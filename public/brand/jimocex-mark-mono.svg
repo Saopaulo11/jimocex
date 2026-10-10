@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="JimoCex">
+  <title>JimoCex</title>
+  <g fill="currentColor" stroke="currentColor">
+    <path d="M32 3.5 57 18v28L32 60.5 7 46V18L32 3.5Z" stroke-width="2" stroke-linejoin="round" fill="none"/>
+    <path d="M19 19h17v4.5h-6.2V38a8.3 8.3 0 0 1-8.3 8.3h-2.6a8.3 8.3 0 0 1-8.3-8.3v-2.2h4.6V38a3.7 3.7 0 0 0 3.7 3.7h2.6a3.7 3.7 0 0 0 3.7-3.7V23.5H19V19Z" stroke="none"/>
+    <path d="M53.5 25.4l-4.2 1.9a9 9 0 0 0-7.6-4.1 9.8 9.8 0 0 0 0 19.6 9 9 0 0 0 7.6-4.1l4.2 1.9a13.6 13.6 0 0 1-11.8 6.7 14.4 14.4 0 0 1 0-28.6 13.6 13.6 0 0 1 11.8 6.7Z" stroke="none"/>
+  </g>
+</svg>

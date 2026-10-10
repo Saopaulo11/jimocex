@@ -1,356 +1,226 @@
 /**
- * JimoCex design system.
+ * JimoCex global styles: reset, base elements, typography.
  *
- * Dark navy, ivory, gold — institutional rather than crypto-neon. The gold is
- * an accent and stays one: it marks the single most important action on a
- * screen and the brand mark, and nothing else. A page where everything is gold
- * has no emphasis left to give.
- *
- * Self-contained by choice. No CSS framework: a trading terminal's layout is
- * specific enough that utility classes would be rewritten into components
- * anyway, and a financial product should not ship a dependency it uses for
- * spacing.
+ * Component styles live in src/styles/components.css. Tokens live in
+ * src/styles/tokens.css and are the only place a raw value is declared.
  */
 
-/* ---------------------------------------------------------------------------
-   Tokens
-   --------------------------------------------------------------------------- */
-
-:root {
-  /* Surfaces — deep navy, warmed slightly so it reads as ink rather than black */
-  --jc-bg: #0a0f18;
-  --jc-surface: #111826;
-  --jc-surface-raised: #17202f;
-  --jc-surface-sunken: #080d14;
-
-  /* Text — ivory, never pure white */
-  --jc-text: #f3f0e8;
-  --jc-text-secondary: #a8b0bf;
-  --jc-text-muted: #6b7687;
-
-  /* Lines */
-  --jc-border: #202b3c;
-  --jc-border-strong: #2d3a4f;
-
-  /* Gold — the brand accent */
-  --jc-gold: #d4af55;
-  --jc-gold-bright: #f0d79a;
-  --jc-gold-deep: #a8822c;
-  --jc-gold-soft: rgb(212 175 85 / 0.12);
-  --jc-gold-ring: rgb(212 175 85 / 0.28);
-
-  /* States. Market green and red sit next to gold, so they are muted enough
-     not to fight it while staying unambiguous. */
-  --jc-up: #3fb27f;
-  --jc-up-soft: rgb(63 178 127 / 0.14);
-  --jc-down: #e2574c;
-  --jc-down-soft: rgb(226 87 76 / 0.14);
-  --jc-warning: #d9a441;
-  --jc-warning-soft: rgb(217 164 65 / 0.14);
-
-  /* Radii — generous, per the brief */
-  --jc-r-sm: 10px;
-  --jc-r: 16px;
-  --jc-r-lg: 22px;
-  --jc-r-xl: 28px;
-
-  /* Elevation. On a dark surface a shadow mostly reads as a subtle edge, so
-     these lean on a light top border instead of a heavy drop. */
-  --jc-shadow: 0 1px 0 rgb(255 255 255 / 0.04) inset, 0 8px 24px rgb(0 0 0 / 0.4);
-  --jc-shadow-lg: 0 1px 0 rgb(255 255 255 / 0.05) inset, 0 24px 56px rgb(0 0 0 / 0.5);
-
-  --jc-font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  /* Tabular figures for anything that is a price, a balance or an amount. */
-  --jc-font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
-}
+@import "../styles/tokens.css";
+@import "../styles/components.css";
 
 /* ---------------------------------------------------------------------------
    Reset
    --------------------------------------------------------------------------- */
 
-*, *::before, *::after { box-sizing: border-box; }
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
 
-* { margin: 0; }
+* {
+  margin: 0;
+}
 
 html {
   -webkit-text-size-adjust: 100%;
   color-scheme: dark;
+  /* Anchored navigation should not land under the fixed header. */
+  scroll-padding-top: calc(var(--jc-header-height) + var(--jc-space-4));
 }
 
 body {
   min-height: 100dvh;
   background: var(--jc-bg);
   color: var(--jc-text);
-  font-family: var(--jc-font);
-  font-size: 16px;
-  line-height: 1.5;
+  font-family: var(--jc-font-sans);
+  font-size: var(--jc-text-body);
+  line-height: var(--jc-leading-body);
   -webkit-font-smoothing: antialiased;
-  /* Never a sideways scroll on a phone. */
+  -moz-osx-font-smoothing: grayscale;
+  /* A horizontal scrollbar on a phone is the clearest sign a layout was not
+     designed for it. Never allow one. */
   overflow-x: clip;
 }
 
-img, svg, video { display: block; max-width: 100%; }
+img,
+svg,
+video,
+canvas {
+  display: block;
+  max-width: 100%;
+}
 
-button, input, select, textarea { font: inherit; color: inherit; }
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
 
-a { color: inherit; text-decoration: none; }
+a {
+  color: inherit;
+  text-decoration: none;
+}
 
-/* A visible focus ring is not optional: keyboard users need to see where they
-   are, and removing it is the most common accessibility regression there is. */
+ul,
+ol {
+  list-style: none;
+  padding: 0;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+/* A visible focus ring is not decoration. Removing it is the single most common
+   accessibility regression, and on a platform where a keystroke can move money
+   the user has to be able to see what is focused.
+
+   :focus-visible rather than :focus so a mouse click does not leave a ring
+   behind on a button that was simply pressed. */
 :focus-visible {
   outline: 2px solid var(--jc-gold);
   outline-offset: 2px;
-  border-radius: 4px;
+  border-radius: var(--jc-radius-sm);
+}
+
+/* Skip link — the first thing a keyboard user meets, and invisible otherwise. */
+.jc-skip-link {
+  position: absolute;
+  left: var(--jc-space-4);
+  top: var(--jc-space-4);
+  z-index: calc(var(--jc-z-header) + 1);
+  padding: var(--jc-space-3) var(--jc-space-4);
+  background: var(--jc-surface-elevated);
+  border: 1px solid var(--jc-gold-border);
+  border-radius: var(--jc-radius);
+  font-size: var(--jc-text-sm);
+  font-weight: var(--jc-weight-medium);
+  transform: translateY(-200%);
+  transition: transform var(--jc-duration) var(--jc-ease);
+}
+
+.jc-skip-link:focus {
+  transform: translateY(0);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
+  *,
+  *::before,
+  *::after {
     animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }
 
 /* ---------------------------------------------------------------------------
    Typography
+   ---------------------------------------------------------------------------
+
+   The serif is reserved for display and h1/h2. Below that the interface is
+   sans, because a serif at 15px in a dense table is harder to scan, and dense
+   tables are most of what this product is.
    --------------------------------------------------------------------------- */
 
-h1, h2, h3, h4 { font-weight: 600; line-height: 1.15; letter-spacing: -0.02em; }
+h1, h2, h3, h4, h5, h6 {
+  font-weight: var(--jc-weight-semibold);
+  line-height: var(--jc-leading-tight);
+  letter-spacing: var(--jc-tracking-tight);
+  text-wrap: balance;
+}
 
-h1 { font-size: clamp(2rem, 1.4rem + 2.6vw, 3.25rem); }
-h2 { font-size: clamp(1.5rem, 1.2rem + 1.3vw, 2.125rem); }
-h3 { font-size: 1.25rem; }
+.jc-display {
+  font-family: var(--jc-font-serif);
+  font-size: var(--jc-text-display);
+  font-weight: var(--jc-weight-regular);
+  line-height: 1.06;
+  letter-spacing: -0.025em;
+}
 
+.jc-h1 {
+  font-family: var(--jc-font-serif);
+  font-size: var(--jc-text-h1);
+  font-weight: var(--jc-weight-regular);
+  line-height: var(--jc-leading-tight);
+  letter-spacing: -0.02em;
+}
+
+.jc-h2 {
+  font-family: var(--jc-font-serif);
+  font-size: var(--jc-text-h2);
+  font-weight: var(--jc-weight-regular);
+  line-height: var(--jc-leading-snug);
+}
+
+.jc-h3 { font-size: var(--jc-text-h3); font-weight: var(--jc-weight-semibold); }
+.jc-h4 { font-size: var(--jc-text-h4); font-weight: var(--jc-weight-semibold); }
+
+.jc-body    { font-size: var(--jc-text-body); color: var(--jc-text-secondary); }
+.jc-body-lg { font-size: var(--jc-text-body-lg); color: var(--jc-text-secondary); line-height: 1.5; }
+.jc-sm      { font-size: var(--jc-text-sm); color: var(--jc-text-secondary); }
+.jc-caption { font-size: var(--jc-text-caption); color: var(--jc-text-muted); }
+
+/* Section eyebrow. Gold, but tiny — this is most of the gold on a given page. */
 .jc-eyebrow {
-  font-size: 0.75rem;
-  font-weight: 600;
-  letter-spacing: 0.14em;
+  font-size: var(--jc-text-label);
+  font-weight: var(--jc-weight-semibold);
+  letter-spacing: var(--jc-tracking-wide);
   text-transform: uppercase;
   color: var(--jc-gold);
 }
 
-.jc-lede { font-size: 1.0625rem; color: var(--jc-text-secondary); }
-
-.jc-muted { color: var(--jc-text-muted); font-size: 0.875rem; }
-
-.jc-numeric { font-family: var(--jc-font-mono); font-variant-numeric: tabular-nums; }
-
-/* ---------------------------------------------------------------------------
-   Layout
-   --------------------------------------------------------------------------- */
-
-.jc-container {
-  width: 100%;
-  max-width: 1200px;
-  margin-inline: auto;
-  /* 16px gutter at phone width, per the brief. */
-  padding-inline: 16px;
+.jc-label {
+  font-size: var(--jc-text-label);
+  font-weight: var(--jc-weight-semibold);
+  letter-spacing: var(--jc-tracking-label);
+  text-transform: uppercase;
+  color: var(--jc-text-muted);
 }
 
-@media (min-width: 768px) {
-  .jc-container { padding-inline: 32px; }
+.jc-muted { color: var(--jc-text-muted); }
+.jc-secondary { color: var(--jc-text-secondary); }
+
+/* Financial figures.
+
+   Tabular numerals are the whole point: with proportional digits a column of
+   prices does not line up, and comparing them by eye — which is what a trader
+   actually does — stops working. `font-variant-numeric` gets this from the
+   system sans without loading a font. */
+.jc-numeric {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1, "lnum" 1;
+  letter-spacing: -0.01em;
 }
 
-.jc-stack { display: flex; flex-direction: column; gap: 16px; }
-.jc-stack-sm { display: flex; flex-direction: column; gap: 8px; }
-.jc-row { display: flex; align-items: center; gap: 12px; }
-.jc-row-between { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-
-/* ---------------------------------------------------------------------------
-   Surfaces
-   --------------------------------------------------------------------------- */
-
-.jc-card {
-  background: var(--jc-surface);
-  border: 1px solid var(--jc-border);
-  border-radius: var(--jc-r-lg);
-  padding: 24px;
+/* For figures that need to be unmistakably machine-exact: addresses, hashes,
+   raw amounts in a confirmation. */
+.jc-mono {
+  font-family: var(--jc-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.95em;
 }
 
-.jc-card-raised {
-  background: var(--jc-surface-raised);
-  border: 1px solid var(--jc-border-strong);
-  border-radius: var(--jc-r-xl);
-  padding: 28px;
-  box-shadow: var(--jc-shadow-lg);
+.jc-link {
+  color: var(--jc-gold);
+  font-weight: var(--jc-weight-medium);
+  transition: color var(--jc-duration-fast) var(--jc-ease);
 }
 
-/* ---------------------------------------------------------------------------
-   Buttons
-   --------------------------------------------------------------------------- */
-
-.jc-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  min-height: 46px;
-  padding: 0 20px;
-  border: 1px solid transparent;
-  border-radius: var(--jc-r-sm);
-  font-size: 0.9375rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background-color 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
-  white-space: nowrap;
-}
-
-.jc-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-
-/* The one gold element on a screen. */
-.jc-btn-primary {
-  background: linear-gradient(180deg, var(--jc-gold-bright), var(--jc-gold));
-  /* Dark text on gold: the only combination here that clears contrast on a
-     light accent. Ivory on gold does not. */
-  color: #15110a;
-  border-color: var(--jc-gold-deep);
-}
-
-.jc-btn-primary:hover:not(:disabled) {
-  background: linear-gradient(180deg, #f7e6b8, var(--jc-gold-bright));
-}
-
-.jc-btn-secondary {
-  background: var(--jc-surface-raised);
-  color: var(--jc-text);
-  border-color: var(--jc-border-strong);
-}
-
-.jc-btn-secondary:hover:not(:disabled) { border-color: var(--jc-gold); }
-
-.jc-btn-ghost { background: transparent; color: var(--jc-text-secondary); }
-.jc-btn-ghost:hover:not(:disabled) { color: var(--jc-text); }
-
-.jc-btn-block { width: 100%; }
-
-/* ---------------------------------------------------------------------------
-   Forms
-   --------------------------------------------------------------------------- */
-
-.jc-field { display: flex; flex-direction: column; gap: 6px; }
-
-.jc-label { font-size: 0.875rem; font-weight: 500; color: var(--jc-text-secondary); }
-
-.jc-input {
-  width: 100%;
-  min-height: 46px;
-  padding: 0 14px;
-  background: var(--jc-surface-sunken);
-  border: 1px solid var(--jc-border-strong);
-  border-radius: var(--jc-r-sm);
-  color: var(--jc-text);
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
-}
-
-.jc-input::placeholder { color: var(--jc-text-muted); }
-
-.jc-input:focus {
-  outline: none;
-  border-color: var(--jc-gold);
-  box-shadow: 0 0 0 3px var(--jc-gold-ring);
-}
-
-.jc-input[aria-invalid="true"] { border-color: var(--jc-down); }
-
-.jc-checkbox-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  font-size: 0.875rem;
-  color: var(--jc-text-secondary);
-}
-
-.jc-checkbox-row input[type="checkbox"] {
-  /* 18px keeps the hit target reachable without a custom control. */
-  width: 18px;
-  height: 18px;
-  margin-top: 2px;
-  accent-color: var(--jc-gold);
-  flex-shrink: 0;
-}
-
-.jc-field-error { font-size: 0.8125rem; color: var(--jc-down); }
-
-/* ---------------------------------------------------------------------------
-   Alerts
-   --------------------------------------------------------------------------- */
-
-.jc-alert {
-  display: flex;
-  gap: 10px;
-  padding: 12px 14px;
-  border: 1px solid;
-  border-radius: var(--jc-r-sm);
-  font-size: 0.875rem;
-  line-height: 1.45;
-}
-
-.jc-alert-error { background: var(--jc-down-soft); border-color: rgb(226 87 76 / 0.35); color: #f2b3ae; }
-.jc-alert-success { background: var(--jc-up-soft); border-color: rgb(63 178 127 / 0.35); color: #9fdcc0; }
-.jc-alert-info { background: var(--jc-gold-soft); border-color: var(--jc-gold-ring); color: var(--jc-gold-bright); }
-
-/* ---------------------------------------------------------------------------
-   Badges
-   --------------------------------------------------------------------------- */
-
-.jc-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 10px;
-  border: 1px solid var(--jc-border-strong);
-  border-radius: 999px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  color: var(--jc-text-secondary);
-}
-
-.jc-badge-gold { border-color: var(--jc-gold-ring); background: var(--jc-gold-soft); color: var(--jc-gold-bright); }
-.jc-badge-muted { color: var(--jc-text-muted); }
-
-/* ---------------------------------------------------------------------------
-   Auth screens
-   --------------------------------------------------------------------------- */
-
-.jc-auth {
-  min-height: 100dvh;
-  display: grid;
-  place-items: center;
-  padding: 32px 16px;
-  /* A single soft gold wash behind the card, so the page has depth without
-     resorting to a busy gradient. */
-  background:
-    radial-gradient(90ch 60ch at 50% -20%, rgb(212 175 85 / 0.07), transparent 70%),
-    var(--jc-bg);
-}
-
-.jc-auth-card { width: 100%; max-width: 440px; }
-
-.jc-auth-header { text-align: center; margin-bottom: 28px; }
-
-.jc-auth-title { font-size: 1.5rem; margin-bottom: 6px; }
-
-.jc-auth-footer {
-  margin-top: 20px;
-  text-align: center;
-  font-size: 0.875rem;
-  color: var(--jc-text-secondary);
-}
-
-.jc-link { color: var(--jc-gold); font-weight: 500; }
-.jc-link:hover { color: var(--jc-gold-bright); text-decoration: underline; }
-
-/* ---------------------------------------------------------------------------
-   Utility
-   --------------------------------------------------------------------------- */
-
-.jc-divider { height: 1px; background: var(--jc-border); border: 0; }
+.jc-link:hover { color: var(--jc-gold-hover); text-decoration: underline; text-underline-offset: 3px; }
 
 .jc-sr-only {
   position: absolute;
-  width: 1px; height: 1px;
-  padding: 0; margin: -1px;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
   overflow: hidden;
   clip-path: inset(50%);
   white-space: nowrap;
+  border: 0;
 }

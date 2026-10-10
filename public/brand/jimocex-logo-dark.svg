@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 64" width="320" height="64" role="img" aria-label="JimoCex">
+  <title>JimoCex</title>
+  <rect width="320" height="64" fill="#070d16"/>
+  <g transform="translate(8 8) scale(0.75)">
+  <path d="M32 3.5 57 18v28L32 60.5 7 46V18L32 3.5Z" stroke="#c9a45c" stroke-width="2" stroke-linejoin="round" fill="none"/>
+  <path d="M32 3.5 57 18l-3 1.7L32 7 10 19.7 7 18 32 3.5Z" fill="#d9b876"/>
+  <path d="M19 19h17v4.5h-6.2V38a8.3 8.3 0 0 1-8.3 8.3h-2.6a8.3 8.3 0 0 1-8.3-8.3v-2.2h4.6V38a3.7 3.7 0 0 0 3.7 3.7h2.6a3.7 3.7 0 0 0 3.7-3.7V23.5H19V19Z" fill="#c9a45c"/>
+  <path d="M53.5 25.4l-4.2 1.9a9 9 0 0 0-7.6-4.1 9.8 9.8 0 0 0 0 19.6 9 9 0 0 0 7.6-4.1l4.2 1.9a13.6 13.6 0 0 1-11.8 6.7 14.4 14.4 0 0 1 0-28.6 13.6 13.6 0 0 1 11.8 6.7Z" fill="#9b7e42"/>
+  </g>
+  <text x="68" y="34" font-family="Georgia, 'Times New Roman', serif" font-size="27" letter-spacing="-0.4">
+    <tspan fill="#f2efe6">Jimo</tspan><tspan fill="#c9a45c">Cex</tspan>
+  </text>
+  <text x="69" y="47" font-family="system-ui, sans-serif" font-size="7.5" letter-spacing="2.1" fill="#727f92">GLOBAL MARKETS. REAL OPPORTUNITIES.</text>
+</svg>

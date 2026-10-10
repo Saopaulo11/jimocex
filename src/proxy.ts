@@ -23,11 +23,19 @@ import { NextResponse, type NextRequest } from "next/server";
  * accessible now — only the redirects would get uglier.
  */
 
-/** Routes that require a signed-in user. Prefix match. */
+/**
+ * Routes that require a signed-in user. Prefix match.
+ *
+ * `/trade` is deliberately NOT here. The terminal is a market view — pair list,
+ * chart, order book — and every exchange lets a visitor look at one before
+ * opening an account; putting it behind the wall also made it unreachable from
+ * the public navigation it appears in. What requires authentication is placing
+ * an order, and that is enforced where it belongs: in the Server Action that
+ * submits one, against the verified session.
+ */
 const PROTECTED_PREFIXES = [
   "/dashboard",
   "/wallets",
-  "/trade",
   "/transactions",
   "/account",
   "/settings",

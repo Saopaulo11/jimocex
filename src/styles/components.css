@@ -1,0 +1,1111 @@
+/**
+ * JimoCex component styles.
+ *
+ * One stylesheet, grouped by component, every value from tokens.css. The
+ * project does not use a CSS framework: a trading terminal's layouts are
+ * specific enough that utility classes get wrapped into components anyway, and
+ * a financial product should not ship a dependency it uses for padding.
+ */
+
+/* ===========================================================================
+   LAYOUT
+   =========================================================================== */
+
+.jc-container {
+  width: 100%;
+  max-width: var(--jc-container);
+  margin-inline: auto;
+  padding-inline: var(--jc-gutter);
+}
+
+.jc-container-wide { max-width: var(--jc-container-wide); }
+.jc-container-text { max-width: var(--jc-container-text); }
+
+.jc-section { padding-block: var(--jc-space-16); }
+
+@media (min-width: 768px) {
+  .jc-section { padding-block: var(--jc-space-24); }
+}
+
+.jc-stack       { display: flex; flex-direction: column; gap: var(--jc-space-4); }
+.jc-stack-sm    { display: flex; flex-direction: column; gap: var(--jc-space-2); }
+.jc-stack-lg    { display: flex; flex-direction: column; gap: var(--jc-space-6); }
+.jc-row         { display: flex; align-items: center; gap: var(--jc-space-3); }
+.jc-row-between { display: flex; align-items: center; justify-content: space-between; gap: var(--jc-space-4); }
+.jc-row-wrap    { flex-wrap: wrap; }
+
+.jc-grid { display: grid; gap: var(--jc-space-4); }
+.jc-grid-2 { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+.jc-grid-3 { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+
+.jc-divider { height: 1px; background: var(--jc-border); border: 0; }
+
+/* --- Application shell ---------------------------------------------------- */
+
+.jc-shell {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+.jc-shell-main { flex: 1; }
+
+/* Clears the fixed bottom navigation on mobile so the last row of a table is
+   not permanently hidden behind it. */
+@media (max-width: 767px) {
+  .jc-shell-main--with-mobilenav {
+    padding-bottom: calc(var(--jc-mobilenav-height) + var(--jc-space-4));
+  }
+}
+
+/* ===========================================================================
+   HEADER
+   =========================================================================== */
+
+.jc-header {
+  position: sticky;
+  top: 0;
+  z-index: var(--jc-z-header);
+  background: color-mix(in srgb, var(--jc-bg) 88%, transparent);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--jc-border);
+}
+
+/* Without backdrop-filter the translucent background would let content show
+   through as it scrolls under the header. Fall back to opaque. */
+@supports not (backdrop-filter: blur(1px)) {
+  .jc-header { background: var(--jc-bg); }
+}
+
+.jc-header-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--jc-space-6);
+  min-height: var(--jc-header-height);
+}
+
+.jc-header-nav {
+  display: none;
+  align-items: center;
+  gap: var(--jc-space-1);
+}
+
+@media (min-width: 900px) {
+  .jc-header-nav { display: flex; }
+}
+
+.jc-navlink {
+  position: relative;
+  padding: var(--jc-space-2) var(--jc-space-3);
+  border-radius: var(--jc-radius-sm);
+  font-size: var(--jc-text-sm);
+  font-weight: var(--jc-weight-medium);
+  color: var(--jc-text-secondary);
+  transition: color var(--jc-duration-fast) var(--jc-ease),
+              background-color var(--jc-duration-fast) var(--jc-ease);
+}
+
+.jc-navlink:hover { color: var(--jc-text); background: var(--jc-surface); }
+
+/* Active route. Gold, but as a 2px rule under the label rather than a glowing
+   pill — the restraint is the point. */
+.jc-navlink[aria-current="page"] { color: var(--jc-text); }
+
+.jc-navlink[aria-current="page"]::after {
+  content: "";
+  position: absolute;
+  left: var(--jc-space-3);
+  right: var(--jc-space-3);
+  bottom: 2px;
+  height: 2px;
+  background: var(--jc-gold);
+  border-radius: 1px;
+}
+
+.jc-navlink[aria-disabled="true"] {
+  color: var(--jc-text-disabled);
+  pointer-events: none;
+}
+
+.jc-header-actions { display: flex; align-items: center; gap: var(--jc-space-2); }
+
+/* ===========================================================================
+   MOBILE NAVIGATION
+   =========================================================================== */
+
+.jc-mobilenav {
+  position: fixed;
+  inset: auto 0 0 0;
+  z-index: var(--jc-z-mobilenav);
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  height: var(--jc-mobilenav-height);
+  /* Keeps the bar clear of the iOS home indicator. */
+  padding-bottom: env(safe-area-inset-bottom);
+  background: var(--jc-bg-secondary);
+  border-top: 1px solid var(--jc-border);
+}
+
+@media (min-width: 900px) {
+  .jc-mobilenav { display: none; }
+}
+
+.jc-mobilenav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  font-size: 11px;
+  font-weight: var(--jc-weight-medium);
+  color: var(--jc-text-muted);
+  transition: color var(--jc-duration-fast) var(--jc-ease);
+}
+
+.jc-mobilenav-item[aria-current="page"] { color: var(--jc-gold); }
+.jc-mobilenav-item:active { color: var(--jc-text); }
+
+/* ===========================================================================
+   FOOTER
+   =========================================================================== */
+
+.jc-footer {
+  border-top: 1px solid var(--jc-border);
+  background: var(--jc-bg-secondary);
+  padding-block: var(--jc-space-16) var(--jc-space-8);
+}
+
+.jc-footer-grid {
+  display: grid;
+  gap: var(--jc-space-10) var(--jc-space-8);
+  grid-template-columns: repeat(2, 1fr);
+  margin-bottom: var(--jc-space-12);
+}
+
+@media (min-width: 640px) { .jc-footer-grid { grid-template-columns: repeat(4, 1fr); } }
+@media (min-width: 1024px) { .jc-footer-grid { grid-template-columns: 1.6fr repeat(4, 1fr); } }
+
+.jc-footer-heading {
+  font-size: var(--jc-text-label);
+  font-weight: var(--jc-weight-semibold);
+  letter-spacing: var(--jc-tracking-label);
+  text-transform: uppercase;
+  color: var(--jc-text-muted);
+  margin-bottom: var(--jc-space-4);
+}
+
+.jc-footer-list { display: flex; flex-direction: column; gap: var(--jc-space-3); }
+
+.jc-footer-link {
+  font-size: var(--jc-text-sm);
+  color: var(--jc-text-secondary);
+  transition: color var(--jc-duration-fast) var(--jc-ease);
+}
+
+.jc-footer-link:hover { color: var(--jc-text); }
+
+.jc-footer-bottom {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--jc-space-4);
+  padding-top: var(--jc-space-8);
+  border-top: 1px solid var(--jc-border-subtle);
+}
+
+/* ===========================================================================
+   BUTTONS
+   =========================================================================== */
+
+.jc-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--jc-space-2);
+  min-height: 42px;
+  padding: 0 var(--jc-space-5);
+  border: 1px solid transparent;
+  border-radius: var(--jc-radius);
+  font-size: var(--jc-text-sm);
+  font-weight: var(--jc-weight-semibold);
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--jc-duration-fast) var(--jc-ease),
+              border-color var(--jc-duration-fast) var(--jc-ease),
+              color var(--jc-duration-fast) var(--jc-ease);
+}
+
+.jc-btn:disabled,
+.jc-btn[aria-disabled="true"] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Primary. Solid gold, flat — no gradient and no glow. One of these per
+   screen; a page with three gold buttons has no primary action. */
+.jc-btn--primary {
+  background: var(--jc-gold);
+  color: var(--jc-text-on-gold);
+  border-color: var(--jc-gold);
+}
+
+.jc-btn--primary:hover:not(:disabled):not([aria-disabled="true"]) {
+  background: var(--jc-gold-hover);
+  border-color: var(--jc-gold-hover);
+}
+
+.jc-btn--primary:active:not(:disabled) { background: var(--jc-gold-muted); }
+
+.jc-btn--secondary {
+  background: var(--jc-surface-elevated);
+  color: var(--jc-text);
+  border-color: var(--jc-border-strong);
+}
+
+.jc-btn--secondary:hover:not(:disabled):not([aria-disabled="true"]) {
+  background: var(--jc-surface-hover);
+  border-color: var(--jc-gold-border);
+}
+
+.jc-btn--tertiary {
+  background: transparent;
+  color: var(--jc-text);
+  border-color: var(--jc-border-strong);
+}
+
+.jc-btn--tertiary:hover:not(:disabled) { background: var(--jc-surface); }
+
+.jc-btn--ghost {
+  background: transparent;
+  color: var(--jc-text-secondary);
+  border-color: transparent;
+}
+
+.jc-btn--ghost:hover:not(:disabled) { color: var(--jc-text); background: var(--jc-surface); }
+
+.jc-btn--danger {
+  background: var(--jc-danger);
+  color: #fff;
+  border-color: var(--jc-danger);
+}
+
+.jc-btn--danger:hover:not(:disabled) { background: #cf6560; border-color: #cf6560; }
+
+.jc-btn--link {
+  min-height: auto;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--jc-gold);
+  font-weight: var(--jc-weight-medium);
+}
+
+.jc-btn--link:hover:not(:disabled) { color: var(--jc-gold-hover); text-decoration: underline; }
+
+.jc-btn--sm { min-height: 34px; padding-inline: var(--jc-space-3); font-size: var(--jc-text-caption); }
+.jc-btn--lg { min-height: 50px; padding-inline: var(--jc-space-6); font-size: var(--jc-text-body); }
+.jc-btn--block { width: 100%; }
+
+/* Loading. The label stays in place and goes transparent rather than being
+   replaced, so the button does not change width mid-click and shift the layout
+   under the cursor. */
+.jc-btn[data-loading="true"] {
+  position: relative;
+  color: transparent !important;
+  pointer-events: none;
+}
+
+.jc-btn[data-loading="true"]::after {
+  content: "";
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: jc-spin 0.6s linear infinite;
+  /* currentColor is transparent above, so restate the visible colour. */
+  border-color: var(--jc-text-on-gold);
+  border-top-color: transparent;
+}
+
+.jc-btn--secondary[data-loading="true"]::after,
+.jc-btn--tertiary[data-loading="true"]::after,
+.jc-btn--ghost[data-loading="true"]::after {
+  border-color: var(--jc-text);
+  border-top-color: transparent;
+}
+
+@keyframes jc-spin { to { transform: rotate(360deg); } }
+
+/* ===========================================================================
+   FORMS
+   =========================================================================== */
+
+.jc-field { display: flex; flex-direction: column; gap: var(--jc-space-2); }
+
+.jc-field-label {
+  font-size: var(--jc-text-caption);
+  font-weight: var(--jc-weight-medium);
+  color: var(--jc-text-secondary);
+}
+
+.jc-input {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 var(--jc-space-4);
+  background: var(--jc-surface-sunken);
+  border: 1px solid var(--jc-border-strong);
+  border-radius: var(--jc-radius);
+  color: var(--jc-text);
+  transition: border-color var(--jc-duration-fast) var(--jc-ease),
+              box-shadow var(--jc-duration-fast) var(--jc-ease);
+}
+
+.jc-input::placeholder { color: var(--jc-text-disabled); }
+.jc-input:hover:not(:disabled):not(:focus) { border-color: var(--jc-border-strong); background: var(--jc-surface); }
+
+.jc-input:focus {
+  outline: none;
+  border-color: var(--jc-gold);
+  box-shadow: 0 0 0 3px var(--jc-gold-ring);
+}
+
+.jc-input[aria-invalid="true"] { border-color: var(--jc-danger); }
+.jc-input[aria-invalid="true"]:focus { box-shadow: 0 0 0 3px var(--jc-danger-soft); }
+
+.jc-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: var(--jc-bg-secondary);
+}
+
+.jc-input[readonly] { background: var(--jc-bg-secondary); color: var(--jc-text-secondary); }
+
+.jc-field-hint  { font-size: var(--jc-text-caption); color: var(--jc-text-muted); }
+.jc-field-error { font-size: var(--jc-text-caption); color: var(--jc-danger); }
+
+/* Select — the native control, restyled. A custom listbox would need to
+   reimplement keyboard handling, typeahead and mobile pickers; the native one
+   already has all three and is more accessible than most replacements. */
+.jc-select {
+  appearance: none;
+  padding-right: var(--jc-space-10);
+  background-image: linear-gradient(45deg, transparent 50%, var(--jc-text-secondary) 50%),
+                    linear-gradient(135deg, var(--jc-text-secondary) 50%, transparent 50%);
+  background-position: calc(100% - 20px) 50%, calc(100% - 14px) 50%;
+  background-size: 6px 6px, 6px 6px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+
+.jc-input-wrap { position: relative; display: flex; align-items: center; }
+
+.jc-input-icon {
+  position: absolute;
+  left: var(--jc-space-4);
+  display: flex;
+  color: var(--jc-text-muted);
+  pointer-events: none;
+}
+
+.jc-input-wrap:focus-within .jc-input-icon { color: var(--jc-gold); }
+
+.jc-input--with-icon { padding-left: calc(var(--jc-space-4) * 2 + 16px); }
+
+.jc-input-action {
+  position: absolute;
+  right: var(--jc-space-2);
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 var(--jc-space-3);
+  background: transparent;
+  border: 0;
+  border-radius: var(--jc-radius-sm);
+  color: var(--jc-text-secondary);
+  font-size: var(--jc-text-caption);
+  font-weight: var(--jc-weight-medium);
+  cursor: pointer;
+}
+
+.jc-input-action:hover { color: var(--jc-text); background: var(--jc-surface-hover); }
+
+.jc-checkbox-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--jc-space-3);
+  font-size: var(--jc-text-sm);
+  color: var(--jc-text-secondary);
+  cursor: pointer;
+}
+
+.jc-checkbox-row input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  flex-shrink: 0;
+  accent-color: var(--jc-gold);
+  cursor: pointer;
+}
+
+/* --- Amount input --------------------------------------------------------- */
+
+.jc-amount {
+  display: flex;
+  flex-direction: column;
+  gap: var(--jc-space-2);
+  padding: var(--jc-space-4);
+  background: var(--jc-surface-sunken);
+  border: 1px solid var(--jc-border-strong);
+  border-radius: var(--jc-radius-lg);
+  transition: border-color var(--jc-duration-fast) var(--jc-ease),
+              box-shadow var(--jc-duration-fast) var(--jc-ease);
+}
+
+.jc-amount:focus-within { border-color: var(--jc-gold); box-shadow: 0 0 0 3px var(--jc-gold-ring); }
+.jc-amount[data-invalid="true"] { border-color: var(--jc-danger); }
+
+.jc-amount-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--jc-space-3);
+}
+
+.jc-amount-body { display: flex; align-items: center; gap: var(--jc-space-3); }
+
+.jc-amount-input {
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: 0;
+  padding: 0;
+  font-size: 1.75rem;
+  font-weight: var(--jc-weight-medium);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  color: var(--jc-text);
+}
+
+.jc-amount-input:focus { outline: none; }
+.jc-amount-input::placeholder { color: var(--jc-text-disabled); }
+.jc-amount-input:disabled { color: var(--jc-text-disabled); }
+
+/* Hides the spinner arrows: a stepper is meaningless on a currency amount. */
+.jc-amount-input::-webkit-outer-spin-button,
+.jc-amount-input::-webkit-inner-spin-button { appearance: none; margin: 0; }
+.jc-amount-input[type="number"] { appearance: textfield; -moz-appearance: textfield; }
+
+.jc-amount-asset {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--jc-space-2);
+  flex-shrink: 0;
+  min-height: 38px;
+  padding: 0 var(--jc-space-3);
+  background: var(--jc-surface-elevated);
+  border: 1px solid var(--jc-border-strong);
+  border-radius: var(--jc-radius);
+  font-size: var(--jc-text-sm);
+  font-weight: var(--jc-weight-semibold);
+  cursor: pointer;
+}
+
+.jc-amount-asset:hover { border-color: var(--jc-gold-border); }
+
+.jc-amount-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--jc-space-3);
+  font-size: var(--jc-text-caption);
+  color: var(--jc-text-muted);
+}
+
+/* ===========================================================================
+   CARDS
+   =========================================================================== */
+
+.jc-card {
+  background: var(--jc-surface);
+  border: 1px solid var(--jc-border);
+  border-radius: var(--jc-radius-lg);
+}
+
+.jc-card--elevated { background: var(--jc-surface-elevated); box-shadow: var(--jc-shadow); }
+.jc-card--outlined { background: transparent; }
+
+.jc-card--interactive {
+  transition: border-color var(--jc-duration-fast) var(--jc-ease),
+              background-color var(--jc-duration-fast) var(--jc-ease);
+}
+
+.jc-card--interactive:hover { border-color: var(--jc-border-strong); background: var(--jc-surface-elevated); }
+
+.jc-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--jc-space-4);
+  padding: var(--jc-space-5) var(--jc-space-5) 0;
+}
+
+.jc-card-title { font-size: var(--jc-text-h4); font-weight: var(--jc-weight-semibold); }
+.jc-card-subtitle { font-size: var(--jc-text-caption); color: var(--jc-text-muted); margin-top: 2px; }
+
+.jc-card-content { padding: var(--jc-space-5); }
+.jc-card-header + .jc-card-content { padding-top: var(--jc-space-4); }
+
+.jc-card-footer {
+  padding: var(--jc-space-4) var(--jc-space-5);
+  border-top: 1px solid var(--jc-border);
+}
+
+/* ===========================================================================
+   TABLE
+   =========================================================================== */
+
+.jc-table-wrap {
+  /* Horizontal scroll inside the table rather than on the page, so a wide
+     market table stays usable on a phone without breaking the layout. */
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.jc-table { font-size: var(--jc-text-sm); }
+
+.jc-table th {
+  padding: var(--jc-space-3) var(--jc-space-4);
+  font-size: var(--jc-text-label);
+  font-weight: var(--jc-weight-semibold);
+  letter-spacing: var(--jc-tracking-label);
+  text-transform: uppercase;
+  color: var(--jc-text-muted);
+  text-align: left;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--jc-border);
+}
+
+.jc-table td {
+  padding: var(--jc-space-4);
+  border-bottom: 1px solid var(--jc-border-subtle);
+  vertical-align: middle;
+}
+
+.jc-table tbody tr { transition: background-color var(--jc-duration-fast) var(--jc-ease); }
+.jc-table tbody tr:hover { background: var(--jc-surface-elevated); }
+.jc-table tbody tr[aria-selected="true"] { background: var(--jc-gold-softer); }
+.jc-table tbody tr:last-child td { border-bottom: 0; }
+
+/* Numbers right-aligned so decimal points stack and magnitudes compare at a
+   glance. This is the single most important rule in a financial table. */
+.jc-table .jc-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.jc-th-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--jc-space-1);
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.jc-th-sort:hover { color: var(--jc-text-secondary); }
+.jc-th-sort[aria-sort] { color: var(--jc-gold); }
+
+.jc-th--num { text-align: right; }
+.jc-th--num .jc-th-sort { justify-content: flex-end; }
+
+/* ===========================================================================
+   BADGES
+   =========================================================================== */
+
+.jc-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--jc-space-1);
+  padding: 3px var(--jc-space-2);
+  border: 1px solid var(--jc-border-strong);
+  border-radius: var(--jc-radius-sm);
+  font-size: var(--jc-text-label);
+  font-weight: var(--jc-weight-semibold);
+  letter-spacing: 0.02em;
+  color: var(--jc-text-secondary);
+  white-space: nowrap;
+}
+
+/* The glyph is not decoration: colour alone is not an accessible status
+   indicator, and roughly 1 in 12 men cannot separate the green from the red. */
+.jc-badge-glyph { font-size: 0.9em; line-height: 1; }
+
+.jc-badge--success { color: var(--jc-success); border-color: var(--jc-success-border); background: var(--jc-success-soft); }
+.jc-badge--warning { color: var(--jc-warning); border-color: var(--jc-warning-border); background: var(--jc-warning-soft); }
+.jc-badge--danger  { color: var(--jc-danger);  border-color: var(--jc-danger-border);  background: var(--jc-danger-soft); }
+.jc-badge--info    { color: var(--jc-info);    border-color: var(--jc-info-border);    background: var(--jc-info-soft); }
+.jc-badge--gold    { color: var(--jc-gold);    border-color: var(--jc-gold-border);    background: var(--jc-gold-soft); }
+.jc-badge--neutral { color: var(--jc-text-muted); }
+
+.jc-badge--pill { border-radius: var(--jc-radius-pill); padding-inline: var(--jc-space-3); }
+
+/* ===========================================================================
+   ALERTS
+   =========================================================================== */
+
+.jc-alert {
+  display: flex;
+  gap: var(--jc-space-3);
+  padding: var(--jc-space-4);
+  border: 1px solid;
+  border-radius: var(--jc-radius);
+  font-size: var(--jc-text-sm);
+  line-height: 1.5;
+}
+
+.jc-alert-icon { flex-shrink: 0; margin-top: 1px; }
+.jc-alert-title { font-weight: var(--jc-weight-semibold); margin-bottom: 2px; }
+.jc-alert-body { color: inherit; opacity: 0.92; }
+
+.jc-alert--info    { background: var(--jc-info-soft);    border-color: var(--jc-info-border);    color: #a9c3e0; }
+.jc-alert--success { background: var(--jc-success-soft); border-color: var(--jc-success-border); color: #92cbae; }
+.jc-alert--warning { background: var(--jc-warning-soft); border-color: var(--jc-warning-border); color: #ddb97e; }
+.jc-alert--danger  { background: var(--jc-danger-soft);  border-color: var(--jc-danger-border);  color: #e0a09c; }
+
+/* ===========================================================================
+   MODAL
+   =========================================================================== */
+
+.jc-modal::backdrop {
+  background: rgb(3 7 12 / 0.72);
+  backdrop-filter: blur(3px);
+}
+
+.jc-modal {
+  width: min(520px, calc(100vw - var(--jc-space-8)));
+  padding: 0;
+  background: var(--jc-surface-elevated);
+  border: 1px solid var(--jc-border-strong);
+  border-radius: var(--jc-radius-xl);
+  box-shadow: var(--jc-shadow-lg);
+  color: var(--jc-text);
+}
+
+.jc-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--jc-space-4);
+  padding: var(--jc-space-6) var(--jc-space-6) 0;
+}
+
+.jc-modal-title { font-size: var(--jc-text-h3); font-weight: var(--jc-weight-semibold); }
+.jc-modal-content { padding: var(--jc-space-5) var(--jc-space-6); }
+
+.jc-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--jc-space-3);
+  padding: var(--jc-space-4) var(--jc-space-6) var(--jc-space-6);
+}
+
+@media (max-width: 520px) {
+  /* Full-width action buttons on a phone: a 44px target in the corner of a
+     dialog is easy to miss and expensive to miss on a withdrawal. */
+  .jc-modal-footer { flex-direction: column-reverse; }
+  .jc-modal-footer .jc-btn { width: 100%; }
+}
+
+/* ===========================================================================
+   LOADING
+   =========================================================================== */
+
+.jc-skeleton {
+  background: linear-gradient(90deg, var(--jc-surface) 25%, var(--jc-surface-hover) 37%, var(--jc-surface) 63%);
+  background-size: 400% 100%;
+  animation: jc-shimmer 1.4s ease infinite;
+  border-radius: var(--jc-radius-sm);
+}
+
+@keyframes jc-shimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+
+.jc-spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--jc-border-strong);
+  border-top-color: var(--jc-gold);
+  border-radius: 50%;
+  animation: jc-spin 0.6s linear infinite;
+}
+
+/* ===========================================================================
+   EMPTY AND ERROR STATES
+   =========================================================================== */
+
+.jc-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--jc-space-3);
+  padding: var(--jc-space-12) var(--jc-space-6);
+}
+
+.jc-empty-mark {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--jc-border-strong);
+  border-radius: var(--jc-radius);
+  color: var(--jc-text-muted);
+  margin-bottom: var(--jc-space-1);
+}
+
+.jc-empty-title { font-size: var(--jc-text-h4); font-weight: var(--jc-weight-semibold); }
+.jc-empty-body  { font-size: var(--jc-text-sm); color: var(--jc-text-muted); max-width: 42ch; }
+
+/* ===========================================================================
+   FINANCIAL
+   =========================================================================== */
+
+.jc-amount-display {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.015em;
+}
+
+.jc-amount-display--lg { font-size: 1.75rem; font-weight: var(--jc-weight-medium); }
+.jc-amount-display--xl { font-size: 2.25rem; font-weight: var(--jc-weight-medium); }
+
+/* The unit is secondary to the figure — same baseline, lighter and smaller, so
+   the eye reads the number first. */
+.jc-amount-unit {
+  font-size: 0.6em;
+  font-weight: var(--jc-weight-medium);
+  color: var(--jc-text-muted);
+  margin-left: 0.35em;
+  letter-spacing: 0.02em;
+}
+
+.jc-change { font-variant-numeric: tabular-nums; font-weight: var(--jc-weight-medium); }
+.jc-change--up   { color: var(--jc-up); }
+.jc-change--down { color: var(--jc-down); }
+.jc-change--flat { color: var(--jc-flat); }
+
+.jc-asset-icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--jc-surface-elevated);
+  border: 1px solid var(--jc-border-strong);
+  font-size: 10px;
+  font-weight: var(--jc-weight-semibold);
+  letter-spacing: 0.02em;
+  color: var(--jc-text-secondary);
+}
+
+.jc-asset-icon--lg { width: 36px; height: 36px; font-size: 12px; }
+
+.jc-stat { display: flex; flex-direction: column; gap: var(--jc-space-2); }
+
+.jc-stat-label {
+  font-size: var(--jc-text-label);
+  font-weight: var(--jc-weight-semibold);
+  letter-spacing: var(--jc-tracking-label);
+  text-transform: uppercase;
+  color: var(--jc-text-muted);
+}
+
+/* A pair of figures that must be compared (available vs locked). The rule
+   between them does the comparing. */
+.jc-stat-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--jc-space-4);
+}
+
+.jc-stat-pair > * + * {
+  padding-left: var(--jc-space-4);
+  border-left: 1px solid var(--jc-border);
+}
+
+/* ===========================================================================
+   AUTH
+   =========================================================================== */
+
+.jc-auth {
+  min-height: 100dvh;
+  display: grid;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 1024px) {
+  /* Brand panel left, form right. The panel is the identity; it carries the
+     tagline so the form does not have to. */
+  .jc-auth { grid-template-columns: 1.05fr 1fr; }
+}
+
+.jc-auth-brand {
+  display: none;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: var(--jc-space-12);
+  background:
+    radial-gradient(70ch 50ch at 20% 0%, rgb(201 164 92 / 0.06), transparent 65%),
+    var(--jc-bg-secondary);
+  border-right: 1px solid var(--jc-border);
+}
+
+@media (min-width: 1024px) { .jc-auth-brand { display: flex; } }
+
+.jc-auth-form-side {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: var(--jc-space-8) var(--jc-gutter);
+}
+
+.jc-auth-form { width: 100%; max-width: 400px; margin-inline: auto; }
+
+.jc-auth-mobile-brand { display: flex; justify-content: center; margin-bottom: var(--jc-space-8); }
+@media (min-width: 1024px) { .jc-auth-mobile-brand { display: none; } }
+
+.jc-auth-header { margin-bottom: var(--jc-space-6); }
+.jc-auth-title { font-family: var(--jc-font-serif); font-size: 1.75rem; font-weight: var(--jc-weight-regular); }
+.jc-auth-sub { font-size: var(--jc-text-sm); color: var(--jc-text-muted); margin-top: var(--jc-space-2); }
+.jc-auth-footer { margin-top: var(--jc-space-6); text-align: center; font-size: var(--jc-text-sm); color: var(--jc-text-secondary); }
+
+/* ===========================================================================
+   HERO
+   =========================================================================== */
+
+.jc-hero {
+  position: relative;
+  overflow: hidden;
+  border-bottom: 1px solid var(--jc-border);
+}
+
+/* A faint rule grid, the way a terminal's background reads. Abstract and
+   static — no fabricated prices, no floating coins. */
+.jc-hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(to right, var(--jc-border-subtle) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--jc-border-subtle) 1px, transparent 1px);
+  background-size: 72px 72px;
+  mask-image: radial-gradient(70% 60% at 70% 30%, #000 0%, transparent 75%);
+  opacity: 0.8;
+  pointer-events: none;
+}
+
+.jc-hero-inner {
+  position: relative;
+  display: grid;
+  /* Stacked on a phone, and the gap is what keeps the trust row from running
+     into the panel below it. */
+  gap: var(--jc-space-12);
+  padding-block: var(--jc-space-16) var(--jc-space-20);
+}
+
+@media (min-width: 1024px) {
+  .jc-hero-inner {
+    grid-template-columns: 1.1fr 0.9fr;
+    gap: var(--jc-space-16);
+    /* Top-aligned, not centred: a short panel centred against a tall column
+       floats in the middle of the page with no edge to relate to. */
+    align-items: start;
+    padding-block: var(--jc-space-24);
+  }
+}
+
+.jc-trust-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--jc-space-3) var(--jc-space-6);
+  margin-top: var(--jc-space-10);
+  padding-top: var(--jc-space-6);
+  border-top: 1px solid var(--jc-border);
+}
+
+.jc-trust-item {
+  display: flex;
+  align-items: center;
+  gap: var(--jc-space-2);
+  font-size: var(--jc-text-caption);
+  color: var(--jc-text-muted);
+}
+
+/* ===========================================================================
+   TRADING TERMINAL
+   =========================================================================== */
+
+.jc-terminal {
+  display: grid;
+  gap: 1px;
+  background: var(--jc-border);
+}
+
+/* A grid item defaults to `min-width: auto`, which means it refuses to shrink
+   below its content's intrinsic width — one wide panel head was forcing the
+   whole terminal to 554px inside a 390px viewport. This is the fix for that
+   entire class of grid overflow. */
+.jc-terminal > * {
+  min-width: 0;
+  background: var(--jc-bg);
+}
+
+/* Mobile is its own layout, not the desktop one stacked in source order.
+   What a trader needs first on a phone is the pair and the order ticket; the
+   book is reference, and the market list is where you go to switch pairs, so
+   it goes last rather than standing between the chart and the form. */
+@media (max-width: 1099px) {
+  .jc-terminal-chart   { order: 1; }
+  .jc-terminal-form    { order: 2; }
+  .jc-terminal-book    { order: 3; }
+  .jc-terminal-markets { order: 4; }
+
+  /* The chart's empty state does not need half a phone screen. */
+  .jc-terminal-chart .jc-empty { padding-block: var(--jc-space-8); }
+}
+
+@media (min-width: 1100px) {
+  .jc-terminal {
+    /* Fills the viewport below the header so the panels reach the bottom edge
+       instead of ending in dead space, which is how a terminal should sit. */
+    min-height: calc(100dvh - var(--jc-header-height));
+    grid-template-columns: 260px 1fr 320px;
+    grid-template-areas:
+      "markets chart form"
+      "markets book  form";
+  }
+  .jc-terminal-markets { grid-area: markets; }
+  .jc-terminal-chart   { grid-area: chart; }
+  .jc-terminal-book    { grid-area: book; }
+  .jc-terminal-form    { grid-area: form; }
+}
+
+.jc-panel { padding: var(--jc-space-4); }
+
+.jc-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  /* Wraps so the pair and its statistics stack on a narrow screen rather than
+     pushing the panel wider than the viewport. */
+  flex-wrap: wrap;
+  gap: var(--jc-space-3);
+  padding-bottom: var(--jc-space-3);
+  margin-bottom: var(--jc-space-3);
+  border-bottom: 1px solid var(--jc-border);
+}
+
+.jc-panel-title {
+  font-size: var(--jc-text-label);
+  font-weight: var(--jc-weight-semibold);
+  letter-spacing: var(--jc-tracking-label);
+  text-transform: uppercase;
+  color: var(--jc-text-muted);
+}
+
+/* Segmented control — buy/sell, order type, market category. */
+.jc-segmented {
+  display: inline-flex;
+  padding: 3px;
+  background: var(--jc-surface-sunken);
+  border: 1px solid var(--jc-border);
+  border-radius: var(--jc-radius);
+  gap: 2px;
+}
+
+.jc-segmented-item {
+  padding: var(--jc-space-2) var(--jc-space-4);
+  border: 0;
+  border-radius: var(--jc-radius-sm);
+  background: transparent;
+  color: var(--jc-text-muted);
+  font-size: var(--jc-text-caption);
+  font-weight: var(--jc-weight-semibold);
+  cursor: pointer;
+  transition: background-color var(--jc-duration-fast) var(--jc-ease),
+              color var(--jc-duration-fast) var(--jc-ease);
+}
+
+.jc-segmented-item:hover { color: var(--jc-text); }
+
+.jc-segmented-item[aria-pressed="true"],
+.jc-segmented-item[aria-selected="true"] {
+  background: var(--jc-surface-elevated);
+  color: var(--jc-text);
+}
+
+.jc-segmented-item[data-side="buy"][aria-pressed="true"]  { color: var(--jc-up); }
+.jc-segmented-item[data-side="sell"][aria-pressed="true"] { color: var(--jc-down); }
+
+.jc-segmented--block { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; width: 100%; }
+
+/* --- Exchange widget ------------------------------------------------------ */
+
+.jc-exchange-widget {
+  display: flex;
+  flex-direction: column;
+  gap: var(--jc-space-3);
+}
+
+/* The swap control sits between the two amount fields and overlaps both, so
+   the pair reads as one unit rather than two stacked inputs. */
+.jc-swap-divider {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-block: calc(var(--jc-space-3) * -1 - 2px);
+  position: relative;
+  z-index: 1;
+}
+
+.jc-swap-btn {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  background: var(--jc-surface-elevated);
+  border: 1px solid var(--jc-border-strong);
+  border-radius: var(--jc-radius);
+  color: var(--jc-text-secondary);
+  cursor: pointer;
+  transition: border-color var(--jc-duration-fast) var(--jc-ease),
+              color var(--jc-duration-fast) var(--jc-ease);
+}
+
+.jc-swap-btn:hover { border-color: var(--jc-gold-border); color: var(--jc-gold); }
+
+.jc-summary { display: flex; flex-direction: column; gap: var(--jc-space-3); }
+
+.jc-summary-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--jc-space-4);
+  font-size: var(--jc-text-sm);
+}
+
+.jc-summary-key { color: var(--jc-text-muted); }
+.jc-summary-val { font-variant-numeric: tabular-nums; text-align: right; }
+.jc-summary-row--total { padding-top: var(--jc-space-3); border-top: 1px solid var(--jc-border); }
+.jc-summary-row--total .jc-summary-val { font-size: var(--jc-text-body-lg); font-weight: var(--jc-weight-semibold); }

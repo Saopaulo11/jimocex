@@ -1,0 +1,225 @@
+/**
+ * JimoCex design tokens.
+ *
+ * Every colour, space, radius and type size in the product resolves to a value
+ * declared here. A hex literal in a component is a bug: it is how a system
+ * drifts into eleven slightly different greys and four slightly different golds.
+ *
+ * The brief for this palette is "quiet confidence" — a platform that reads as
+ * financial infrastructure rather than as a crypto product. In practice that is
+ * less about which colours are used than about how little of the accent appears.
+ * Gold marks the mark, the active route, and the one primary action on a screen.
+ * Everything else is navy, charcoal and ivory, and the hierarchy is carried by
+ * type and spacing.
+ */
+
+:root {
+  /* -------------------------------------------------------------------------
+     Surfaces
+
+     Deep navy rather than black. Pure #000 reads as an OLED phone app; a navy
+     base reads as a terminal, and it gives the elevation steps somewhere to go.
+     Each step is a small, even lift — the separation between panels comes from
+     the border, not from a dramatic change in lightness.
+     ------------------------------------------------------------------------- */
+  --jc-bg:               #070d16;
+  --jc-bg-secondary:     #0a1119;
+  --jc-surface:          #0f1823;
+  --jc-surface-elevated: #141f2d;
+  --jc-surface-hover:    #192637;
+  --jc-surface-sunken:   #050a11;
+
+  /* -------------------------------------------------------------------------
+     Borders
+
+     A hairline is the primary separator in this system. It keeps dense
+     financial tables legible without the heavy shadows that would make the page
+     feel like a mobile app.
+     ------------------------------------------------------------------------- */
+  --jc-border:           #1c2735;
+  --jc-border-strong:    #2a3849;
+  --jc-border-subtle:    #141d29;
+
+  /* -------------------------------------------------------------------------
+     Text
+
+     Ivory, never pure white: #fff on a dark navy vibrates slightly and looks
+     cheap at body sizes. The warm cast also ties the text to the gold without
+     spending any gold.
+
+     Contrast on --jc-bg: text 15.8:1, secondary 7.6:1, muted 4.6:1. The muted
+     tone is for labels and captions only, never for a sentence a customer has
+     to read.
+     ------------------------------------------------------------------------- */
+  --jc-text:             #f2efe6;
+  --jc-text-secondary:   #a3aec0;
+  --jc-text-muted:       #727f92;
+  --jc-text-disabled:    #4b5768;
+  /* For text sitting ON gold. Near-black, because ivory on gold fails contrast. */
+  --jc-text-on-gold:     #140f05;
+
+  /* -------------------------------------------------------------------------
+     Gold
+
+     One accent, used sparingly. Restrained rather than metallic: a saturated
+     "crypto gold" at scale reads as a casino, and the whole positioning here
+     depends on it not doing that.
+     ------------------------------------------------------------------------- */
+  --jc-gold:             #c9a45c;
+  --jc-gold-hover:       #d9b876;
+  --jc-gold-muted:       #9b7e42;
+  --jc-gold-soft:        rgb(201 164 92 / 0.10);
+  --jc-gold-softer:      rgb(201 164 92 / 0.05);
+  --jc-gold-ring:        rgb(201 164 92 / 0.32);
+  --jc-gold-border:      rgb(201 164 92 / 0.38);
+
+  /* -------------------------------------------------------------------------
+     Status
+
+     Desaturated on purpose. These sit next to gold and next to each other in
+     tables, so they have to coexist; a neon green beside a restrained gold
+     would pull the whole page toward the crypto look this system avoids.
+     ------------------------------------------------------------------------- */
+  --jc-success:          #4a9d74;
+  --jc-success-soft:     rgb(74 157 116 / 0.12);
+  --jc-success-border:   rgb(74 157 116 / 0.32);
+
+  --jc-warning:          #c4913d;
+  --jc-warning-soft:     rgb(196 145 61 / 0.12);
+  --jc-warning-border:   rgb(196 145 61 / 0.32);
+
+  --jc-danger:           #c05851;
+  --jc-danger-soft:      rgb(192 88 81 / 0.12);
+  --jc-danger-border:    rgb(192 88 81 / 0.32);
+
+  --jc-info:             #5e87b8;
+  --jc-info-soft:        rgb(94 135 184 / 0.12);
+  --jc-info-border:      rgb(94 135 184 / 0.32);
+
+  /* Market direction. Separate tokens from success/danger: a falling price is
+     not an error, and one day these may need to follow a regional convention
+     (red-up in parts of Asia) without touching validation colours. */
+  --jc-up:               #4a9d74;
+  --jc-up-soft:          rgb(74 157 116 / 0.12);
+  --jc-down:             #c05851;
+  --jc-down-soft:        rgb(192 88 81 / 0.12);
+  --jc-flat:             var(--jc-text-muted);
+
+  /* -------------------------------------------------------------------------
+     Typography
+
+     No web font is downloaded. A financial terminal is judged on how fast it
+     paints and how well its numbers line up, and the system stacks below do
+     both without a network round trip.
+
+     The serif is reserved for display type and the wordmark. It is what makes
+     the product read as a financial institution rather than a SaaS dashboard —
+     the single most effective "expensive" signal available, and it costs
+     nothing.
+     ------------------------------------------------------------------------- */
+  --jc-font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+                  "Helvetica Neue", Arial, sans-serif;
+  --jc-font-serif: ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+  --jc-font-mono: ui-monospace, "SF Mono", SFMono-Regular, "Cascadia Mono",
+                  Menlo, Consolas, "Liberation Mono", monospace;
+
+  /* Type scale. Ratio is deliberately shallow at body sizes and opens up only
+     at display — dense financial UI needs the middle of the scale to be calm. */
+  --jc-text-display:  clamp(2.5rem, 1.9rem + 2.6vw, 4rem);
+  --jc-text-h1:       clamp(2rem, 1.6rem + 1.7vw, 3rem);
+  --jc-text-h2:       clamp(1.5rem, 1.3rem + 0.9vw, 2rem);
+  --jc-text-h3:       1.25rem;
+  --jc-text-h4:       1.0625rem;
+  --jc-text-body:     0.9375rem;
+  --jc-text-body-lg:  1.0625rem;
+  --jc-text-sm:       0.875rem;
+  --jc-text-caption:  0.8125rem;
+  --jc-text-label:    0.75rem;
+
+  --jc-leading-tight: 1.15;
+  --jc-leading-snug:  1.35;
+  --jc-leading-body:  1.55;
+
+  --jc-tracking-tight: -0.02em;
+  --jc-tracking-label: 0.08em;
+  --jc-tracking-wide:  0.16em;
+
+  --jc-weight-regular:  400;
+  --jc-weight-medium:   500;
+  --jc-weight-semibold: 600;
+
+  /* -------------------------------------------------------------------------
+     Spacing — a 4px grid.
+
+     Every margin and padding in the product is one of these. The precision is
+     most of what separates an expensive-looking interface from a cheap one, and
+     it is not achievable while 17px and 23px are still in the codebase.
+     ------------------------------------------------------------------------- */
+  --jc-space-1:  4px;
+  --jc-space-2:  8px;
+  --jc-space-3:  12px;
+  --jc-space-4:  16px;
+  --jc-space-5:  20px;
+  --jc-space-6:  24px;
+  --jc-space-8:  32px;
+  --jc-space-10: 40px;
+  --jc-space-12: 48px;
+  --jc-space-16: 64px;
+  --jc-space-20: 80px;
+  --jc-space-24: 96px;
+  --jc-space-32: 128px;
+
+  /* -------------------------------------------------------------------------
+     Radii
+
+     Moderate. A trading terminal with pill-shaped everything looks like a
+     consumer wallet app; square corners look like a 2008 intranet. 8–12px for
+     most surfaces, and nothing fully rounded except genuine pills (badges).
+     ------------------------------------------------------------------------- */
+  --jc-radius-sm:   6px;
+  --jc-radius:      8px;
+  --jc-radius-md:   10px;
+  --jc-radius-lg:   12px;
+  --jc-radius-xl:   16px;
+  --jc-radius-pill: 999px;
+
+  /* -------------------------------------------------------------------------
+     Elevation
+
+     Deliberately almost invisible. On a dark surface a drop shadow mostly
+     muddies the background; separation here comes from the border and from a
+     one-pixel highlight along the top edge, which is how real depth reads.
+     ------------------------------------------------------------------------- */
+  --jc-shadow-sm: 0 1px 2px rgb(0 0 0 / 0.30);
+  --jc-shadow:    0 1px 0 rgb(255 255 255 / 0.03) inset, 0 4px 16px rgb(0 0 0 / 0.32);
+  --jc-shadow-lg: 0 1px 0 rgb(255 255 255 / 0.04) inset, 0 16px 40px rgb(0 0 0 / 0.40);
+
+  /* Layout */
+  --jc-container:      1280px;
+  --jc-container-wide: 1600px;
+  --jc-container-text: 68ch;
+  --jc-gutter:         16px;
+  --jc-header-height:  64px;
+  --jc-mobilenav-height: 60px;
+
+  /* Motion — short and unobtrusive. Nothing here should be noticeable. */
+  --jc-ease: cubic-bezier(0.2, 0, 0.2, 1);
+  --jc-duration-fast: 120ms;
+  --jc-duration: 180ms;
+
+  --jc-z-header: 100;
+  --jc-z-mobilenav: 100;
+  --jc-z-dropdown: 200;
+  --jc-z-modal: 300;
+}
+
+@media (min-width: 768px) {
+  :root {
+    --jc-gutter: 32px;
+    --jc-header-height: 72px;
+  }
+}
+
+@media (min-width: 1280px) {
+  :root { --jc-gutter: 48px; }
+}

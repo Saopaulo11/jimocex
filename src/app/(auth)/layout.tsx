@@ -1,23 +1,52 @@
 import Link from "next/link";
 
-import { JimoCexLogo } from "@/components/JimoCexLogo";
+import { BRAND_TAGLINE, Logo } from "@/components/brand/Logo";
 
 /**
- * Shell for every authentication screen. Centred card on a navy field with a
- * single soft gold wash — the brand's only decoration on these pages, because
- * a sign-in form is a place for confidence, not ornament.
+ * Authentication shell (spec §34).
+ *
+ * Two columns on a desktop: the brand panel carries the identity and the
+ * tagline so the form beside it can stay severe — email, password, one action,
+ * nothing else. On a phone the panel collapses and only the mark remains above
+ * the form.
  */
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
   return (
-    <main className="jc-auth">
-      <div className="jc-auth-card">
-        <div style={{ display: "flex", justifyContent: "center", marginBottom: 28 }}>
-          <Link href="/" aria-label="JimoCex home">
-            <JimoCexLogo size={30} showTagline />
-          </Link>
+    <div className="jc-auth">
+      <aside className="jc-auth-brand">
+        <Link href="/" aria-label="JimoCex home">
+          <Logo variant="compact" size={28} />
+        </Link>
+
+        <div>
+          <p className="jc-display" style={{ maxWidth: "14ch", fontSize: "clamp(2.25rem, 2.6vw, 3rem)" }}>
+            Global markets.
+            <br />
+            One platform.
+          </p>
+          <p
+            className="jc-label"
+            style={{ marginTop: "var(--jc-space-6)", color: "var(--jc-gold)" }}
+          >
+            {BRAND_TAGLINE}
+          </p>
         </div>
-        {children}
-      </div>
-    </main>
+
+        <p className="jc-caption" style={{ maxWidth: "44ch" }}>
+          One account for digital assets, currency markets and global trading.
+        </p>
+      </aside>
+
+      <main className="jc-auth-form-side">
+        <div className="jc-auth-form">
+          <div className="jc-auth-mobile-brand">
+            <Link href="/" aria-label="JimoCex home">
+              <Logo variant="compact" size={26} />
+            </Link>
+          </div>
+          {children}
+        </div>
+      </main>
+    </div>
   );
 }

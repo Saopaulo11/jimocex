@@ -1,26 +1,9 @@
+import { Alert } from "@/components/ui/Alert";
 import type { FormState } from "@/lib/auth/validation";
 
-/**
- * Renders an action's error or success message.
- *
- * `role="alert"` so a screen reader announces the result without the user
- * having to go looking for it — a sighted user sees the red box appear, and
- * this is the equivalent.
- */
+/** Renders whichever of an action's outcomes is present. */
 export function FormAlert({ state }: { state: FormState }) {
-  if (state.error) {
-    return (
-      <div className="jc-alert jc-alert-error" role="alert">
-        {state.error}
-      </div>
-    );
-  }
-  if (state.success) {
-    return (
-      <div className="jc-alert jc-alert-success" role="status">
-        {state.success}
-      </div>
-    );
-  }
+  if (state.error) return <Alert tone="danger">{state.error}</Alert>;
+  if (state.success) return <Alert tone="success">{state.success}</Alert>;
   return null;
 }

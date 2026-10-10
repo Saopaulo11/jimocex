@@ -4,9 +4,10 @@ import Link from "next/link";
 import { useActionState } from "react";
 
 import { signUp } from "@/app/auth/actions";
+import { Input } from "@/components/ui/Input";
+import { PasswordInput } from "@/components/ui/PasswordInput";
 import type { FormState } from "@/lib/auth/validation";
 
-import { Field } from "./Field";
 import { FormAlert } from "./FormAlert";
 import { SubmitButton } from "./SubmitButton";
 
@@ -19,29 +20,30 @@ export function SignupForm() {
     <form action={formAction} className="jc-stack">
       <FormAlert state={state} />
 
-      <Field
+      <Input
         id="email"
         label="Email"
         type="email"
         autoComplete="email"
         placeholder="you@example.com"
+        required
         error={state.fieldErrors?.email}
       />
 
-      <Field
+      <PasswordInput
         id="password"
         label="Password"
-        type="password"
         autoComplete="new-password"
+        required
         hint="At least 10 characters."
         error={state.fieldErrors?.password}
       />
 
-      <Field
+      <PasswordInput
         id="confirmPassword"
         label="Confirm password"
-        type="password"
         autoComplete="new-password"
+        required
         error={state.fieldErrors?.confirmPassword}
       />
 
@@ -65,7 +67,7 @@ export function SignupForm() {
         ) : null}
       </div>
 
-      <SubmitButton pendingLabel="Creating account…">Create account</SubmitButton>
+      <SubmitButton pendingLabel="Creating account">Create account</SubmitButton>
     </form>
   );
 }

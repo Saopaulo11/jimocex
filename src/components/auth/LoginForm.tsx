@@ -4,9 +4,11 @@ import Link from "next/link";
 import { useActionState } from "react";
 
 import { signIn } from "@/app/auth/actions";
+import { Alert } from "@/components/ui/Alert";
+import { Input } from "@/components/ui/Input";
+import { PasswordInput } from "@/components/ui/PasswordInput";
 import type { FormState } from "@/lib/auth/validation";
 
-import { Field } from "./Field";
 import { FormAlert } from "./FormAlert";
 import { SubmitButton } from "./SubmitButton";
 
@@ -18,41 +20,39 @@ export function LoginForm({ next, linkError }: { next?: string; linkError?: bool
   return (
     <form action={formAction} className="jc-stack">
       {linkError ? (
-        <div className="jc-alert jc-alert-error" role="alert">
-          That link is no longer valid. Please sign in, or request a new one.
-        </div>
+        <Alert tone="danger">That link is no longer valid. Please sign in, or request a new one.</Alert>
       ) : null}
 
       <FormAlert state={state} />
 
-      {/* The post-sign-in destination travels with the form rather than in the
-          action's closure, and is narrowed to an in-app path server-side. */}
+      {/* Travels with the form; narrowed to an in-app path on the server. */}
       {next ? <input type="hidden" name="next" value={next} /> : null}
 
-      <Field
+      <Input
         id="email"
         label="Email"
         type="email"
         autoComplete="email"
         placeholder="you@example.com"
+        required
         error={state.fieldErrors?.email}
       />
 
-      <Field
+      <PasswordInput
         id="password"
         label="Password"
-        type="password"
         autoComplete="current-password"
+        required
         error={state.fieldErrors?.password}
       />
 
-      <div style={{ textAlign: "right", marginTop: -4 }}>
-        <Link href="/forgot-password" className="jc-link" style={{ fontSize: "0.875rem" }}>
+      <div style={{ textAlign: "right", marginTop: "calc(var(--jc-space-1) * -1)" }}>
+        <Link href="/forgot-password" className="jc-link" style={{ fontSize: "var(--jc-text-caption)" }}>
           Forgot password?
         </Link>
       </div>
 
-      <SubmitButton pendingLabel="Signing in…">Sign in</SubmitButton>
+      <SubmitButton pendingLabel="Signing in">Log in</SubmitButton>
     </form>
   );
 }

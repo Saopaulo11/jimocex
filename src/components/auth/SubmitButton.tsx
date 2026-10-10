@@ -2,20 +2,28 @@
 
 import { useFormStatus } from "react-dom";
 
+import { Button } from "@/components/ui/Button";
+
 /**
- * Submit button that disables itself while the action is in flight.
+ * Submit button wired to the enclosing form's pending state.
  *
- * On a financial form this is not only polish: a double-submitted sign-up or
- * password change is a request the server then has to de-duplicate.
- * `useFormStatus` reads the state of the enclosing <form>, which is why this
- * has to be its own client component rather than a prop on the page.
+ * Must be its own client component: `useFormStatus` reads the state of the
+ * <form> above it, and a hook cannot do that from the page that renders the
+ * form. Blocking the second click is not cosmetic here — a double-submitted
+ * sign-up is a request the server then has to de-duplicate.
  */
-export function SubmitButton({ children, pendingLabel }: { children: React.ReactNode; pendingLabel: string }) {
+export function SubmitButton({
+  children,
+  pendingLabel,
+}: {
+  children: React.ReactNode;
+  pendingLabel: string;
+}) {
   const { pending } = useFormStatus();
 
   return (
-    <button type="submit" className="jc-btn jc-btn-primary jc-btn-block" disabled={pending}>
-      {pending ? pendingLabel : children}
-    </button>
+    <Button type="submit" variant="primary" block loading={pending} loadingLabel={pendingLabel}>
+      {children}
+    </Button>
   );
 }

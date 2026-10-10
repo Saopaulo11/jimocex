@@ -11,13 +11,13 @@ export const metadata: Metadata = { title: "Set a new password" };
  */
 export default function ResetPasswordPage() {
   return (
-    <div className="jc-card-raised">
+    <>
       <div className="jc-auth-header">
         <h1 className="jc-auth-title">Set a new password</h1>
-        <p className="jc-muted">Choose a password you have not used elsewhere.</p>
+        <p className="jc-auth-sub">Choose a password you have not used elsewhere.</p>
       </div>
 
       <ResetPasswordForm />
-    </div>
+    </>
   );
 }

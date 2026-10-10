@@ -4,7 +4,7 @@ import Link from "next/link";
 import { LoginForm } from "@/components/auth/LoginForm";
 import { safeRedirectPath } from "@/lib/auth/validation";
 
-export const metadata: Metadata = { title: "Sign in" };
+export const metadata: Metadata = { title: "Log in" };
 
 export default async function LoginPage({
   searchParams,
@@ -17,20 +17,20 @@ export default async function LoginPage({
   const next = safeRedirectPath(params.next, "");
 
   return (
-    <div className="jc-card-raised">
+    <>
       <div className="jc-auth-header">
-        <h1 className="jc-auth-title">Sign in</h1>
-        <p className="jc-muted">Access your JimoCex account.</p>
+        <h1 className="jc-auth-title">Log in</h1>
+        <p className="jc-auth-sub">Access your JimoCex account.</p>
       </div>
 
       <LoginForm next={next || undefined} linkError={params.error === "invalid_link"} />
 
       <p className="jc-auth-footer">
-        New to JimoCex?{" "}
+        Don&rsquo;t have an account?{" "}
         <Link href="/signup" className="jc-link">
-          Create an account
+          Create account
         </Link>
       </p>
-    </div>
+    </>
   );
 }

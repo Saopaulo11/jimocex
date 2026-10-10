@@ -1,0 +1,34 @@
+{
+  "name": "jimocex",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "test:db": "./scripts/test-db.sh",
+    "test": "npm run test:unit && npm run test:db",
+    "db:types": "echo 'Regenerate with: supabase gen types typescript --project-id <ref> > src/lib/supabase/database.types.ts'",
+    "test:unit": "node --test --experimental-strip-types \"src/**/__tests__/*.test.ts\"",
+    "verify": "npm run lint && npm run typecheck && npm run test && npm run build"
+  },
+  "dependencies": {
+    "@supabase/ssr": "^0.8.0",
+    "@supabase/supabase-js": "^2.95.0",
+    "next": "16.3.5",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "server-only": "^0.0.1",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.5",
+    "typescript": "^5"
+  }
+}

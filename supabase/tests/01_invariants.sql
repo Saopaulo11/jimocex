@@ -109,6 +109,29 @@ insert into auth.users (id, email) values
   ('00000000-0000-4000-8000-0000000000b2', 'bob@test.invalid');
 
 -- =============================================================================
+-- §8, §25.1 — a new account lands on TIER_0, ACTIVE, unverified
+--
+-- Not set by the application: the on_auth_user_created trigger writes the
+-- profile, so there is no code path on which a client could choose its own
+-- starting tier.
+-- =============================================================================
+
+do $$
+declare
+  a uuid := '00000000-0000-4000-8000-0000000000a1';
+begin
+  perform pg_temp.holds('§25.1 a new user is created at TIER_0',
+    (select tier_code = 'TIER_0' from public.profiles where user_id = a));
+  perform pg_temp.holds('§8 a new user is ACTIVE',
+    (select status = 'ACTIVE' from public.profiles where user_id = a));
+  perform pg_temp.holds('§23 a new user starts with KYC NOT_STARTED',
+    (select kyc_status = 'NOT_STARTED' from public.profiles where user_id = a));
+  perform pg_temp.holds('§8 the signup trigger created exactly one profile',
+    (select count(*) = 1 from public.profiles where user_id = a));
+end;
+$$;
+
+-- =============================================================================
 -- §19.1, §19.2, §19.3, §18 — ledger and wallet core
 -- =============================================================================
 
@@ -362,6 +385,12 @@ values ('00000000-0000-4000-8000-0000000000a1', 'withdrawal', 'REVIEW', 'TEST_RU
 insert into public.notifications (user_id, title, body)
 values ('00000000-0000-4000-8000-0000000000a1', 'Test', 'Body');
 
+-- Suspend Alice as the platform would, so her attempt to set herself back to
+-- ACTIVE below is a genuine escalation attempt rather than a write that happens
+-- to match the existing value.
+update public.profiles set status = 'SUSPENDED'
+where user_id = '00000000-0000-4000-8000-0000000000a1';
+
 -- Become Alice. From here on, every statement runs under the same role and
 -- claims a browser session would carry.
 do $$ begin
@@ -421,6 +450,11 @@ begin
     format($q$ update public.profiles set display_name = 'Alice' where user_id = %L $q$, a),
     format($q$ select exists (select 1 from public.profiles
                               where user_id = %L and display_name = 'Alice') $q$, a));
+
+  perform pg_temp.no_effect('§9 user cannot change their own account status',
+    format($q$ update public.profiles set status = 'ACTIVE' where user_id = %L $q$, a),
+    format($q$ select not exists (select 1 from public.profiles
+                                  where user_id = %L and status <> 'SUSPENDED') $q$, a));
 
   perform pg_temp.rejects('§43 user cannot make themselves an admin', format(
     $q$ insert into public.admin_users (user_id, email, role) values (%L, 'x@test.invalid', 'SUPER_ADMIN') $q$, a));

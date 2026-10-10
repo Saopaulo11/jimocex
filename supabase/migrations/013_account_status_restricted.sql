@@ -1,0 +1,27 @@
+-- =============================================================================
+-- JimoCex — 013_account_status_restricted
+--
+-- Adds RESTRICTED to the account status ladder (spec §9).
+--
+-- The four states now express genuinely different decisions, which matters
+-- because each one gates a different set of operations:
+--
+--   ACTIVE      normal.
+--   RESTRICTED  a risk or compliance rule has narrowed what this account may
+--               do. Sign-in works, reads work, and some operations are allowed
+--               — which ones is RiskEngine's call per operation, not a blanket
+--               rule. This is the state for "we need another look at this",
+--               and it is the reason it is separate from SUSPENDED.
+--   SUSPENDED   sign-in still works so the customer can see their balances and
+--               talk to support, but NO financial operation is permitted.
+--   FROZEN      everything stops, including by platform-initiated action. Kept
+--               distinct from SUSPENDED for the cases where an account must be
+--               immobilised outright rather than merely barred from trading.
+--   CLOSED      the account is over. Financial history is NEVER deleted with it
+--               (spec §9): the ledger is append-only and the rows stay.
+--
+-- Additive only: no existing value is renamed or removed, so nothing that
+-- already reads this enum changes behaviour.
+-- =============================================================================
+
+alter type public.account_status add value if not exists 'RESTRICTED' after 'ACTIVE';

@@ -1,0 +1,356 @@
+/**
+ * JimoCex design system.
+ *
+ * Dark navy, ivory, gold — institutional rather than crypto-neon. The gold is
+ * an accent and stays one: it marks the single most important action on a
+ * screen and the brand mark, and nothing else. A page where everything is gold
+ * has no emphasis left to give.
+ *
+ * Self-contained by choice. No CSS framework: a trading terminal's layout is
+ * specific enough that utility classes would be rewritten into components
+ * anyway, and a financial product should not ship a dependency it uses for
+ * spacing.
+ */
+
+/* ---------------------------------------------------------------------------
+   Tokens
+   --------------------------------------------------------------------------- */
+
+:root {
+  /* Surfaces — deep navy, warmed slightly so it reads as ink rather than black */
+  --jc-bg: #0a0f18;
+  --jc-surface: #111826;
+  --jc-surface-raised: #17202f;
+  --jc-surface-sunken: #080d14;
+
+  /* Text — ivory, never pure white */
+  --jc-text: #f3f0e8;
+  --jc-text-secondary: #a8b0bf;
+  --jc-text-muted: #6b7687;
+
+  /* Lines */
+  --jc-border: #202b3c;
+  --jc-border-strong: #2d3a4f;
+
+  /* Gold — the brand accent */
+  --jc-gold: #d4af55;
+  --jc-gold-bright: #f0d79a;
+  --jc-gold-deep: #a8822c;
+  --jc-gold-soft: rgb(212 175 85 / 0.12);
+  --jc-gold-ring: rgb(212 175 85 / 0.28);
+
+  /* States. Market green and red sit next to gold, so they are muted enough
+     not to fight it while staying unambiguous. */
+  --jc-up: #3fb27f;
+  --jc-up-soft: rgb(63 178 127 / 0.14);
+  --jc-down: #e2574c;
+  --jc-down-soft: rgb(226 87 76 / 0.14);
+  --jc-warning: #d9a441;
+  --jc-warning-soft: rgb(217 164 65 / 0.14);
+
+  /* Radii — generous, per the brief */
+  --jc-r-sm: 10px;
+  --jc-r: 16px;
+  --jc-r-lg: 22px;
+  --jc-r-xl: 28px;
+
+  /* Elevation. On a dark surface a shadow mostly reads as a subtle edge, so
+     these lean on a light top border instead of a heavy drop. */
+  --jc-shadow: 0 1px 0 rgb(255 255 255 / 0.04) inset, 0 8px 24px rgb(0 0 0 / 0.4);
+  --jc-shadow-lg: 0 1px 0 rgb(255 255 255 / 0.05) inset, 0 24px 56px rgb(0 0 0 / 0.5);
+
+  --jc-font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  /* Tabular figures for anything that is a price, a balance or an amount. */
+  --jc-font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+}
+
+/* ---------------------------------------------------------------------------
+   Reset
+   --------------------------------------------------------------------------- */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+* { margin: 0; }
+
+html {
+  -webkit-text-size-adjust: 100%;
+  color-scheme: dark;
+}
+
+body {
+  min-height: 100dvh;
+  background: var(--jc-bg);
+  color: var(--jc-text);
+  font-family: var(--jc-font);
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  /* Never a sideways scroll on a phone. */
+  overflow-x: clip;
+}
+
+img, svg, video { display: block; max-width: 100%; }
+
+button, input, select, textarea { font: inherit; color: inherit; }
+
+a { color: inherit; text-decoration: none; }
+
+/* A visible focus ring is not optional: keyboard users need to see where they
+   are, and removing it is the most common accessibility regression there is. */
+:focus-visible {
+  outline: 2px solid var(--jc-gold);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Typography
+   --------------------------------------------------------------------------- */
+
+h1, h2, h3, h4 { font-weight: 600; line-height: 1.15; letter-spacing: -0.02em; }
+
+h1 { font-size: clamp(2rem, 1.4rem + 2.6vw, 3.25rem); }
+h2 { font-size: clamp(1.5rem, 1.2rem + 1.3vw, 2.125rem); }
+h3 { font-size: 1.25rem; }
+
+.jc-eyebrow {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--jc-gold);
+}
+
+.jc-lede { font-size: 1.0625rem; color: var(--jc-text-secondary); }
+
+.jc-muted { color: var(--jc-text-muted); font-size: 0.875rem; }
+
+.jc-numeric { font-family: var(--jc-font-mono); font-variant-numeric: tabular-nums; }
+
+/* ---------------------------------------------------------------------------
+   Layout
+   --------------------------------------------------------------------------- */
+
+.jc-container {
+  width: 100%;
+  max-width: 1200px;
+  margin-inline: auto;
+  /* 16px gutter at phone width, per the brief. */
+  padding-inline: 16px;
+}
+
+@media (min-width: 768px) {
+  .jc-container { padding-inline: 32px; }
+}
+
+.jc-stack { display: flex; flex-direction: column; gap: 16px; }
+.jc-stack-sm { display: flex; flex-direction: column; gap: 8px; }
+.jc-row { display: flex; align-items: center; gap: 12px; }
+.jc-row-between { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+
+/* ---------------------------------------------------------------------------
+   Surfaces
+   --------------------------------------------------------------------------- */
+
+.jc-card {
+  background: var(--jc-surface);
+  border: 1px solid var(--jc-border);
+  border-radius: var(--jc-r-lg);
+  padding: 24px;
+}
+
+.jc-card-raised {
+  background: var(--jc-surface-raised);
+  border: 1px solid var(--jc-border-strong);
+  border-radius: var(--jc-r-xl);
+  padding: 28px;
+  box-shadow: var(--jc-shadow-lg);
+}
+
+/* ---------------------------------------------------------------------------
+   Buttons
+   --------------------------------------------------------------------------- */
+
+.jc-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 46px;
+  padding: 0 20px;
+  border: 1px solid transparent;
+  border-radius: var(--jc-r-sm);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+  white-space: nowrap;
+}
+
+.jc-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* The one gold element on a screen. */
+.jc-btn-primary {
+  background: linear-gradient(180deg, var(--jc-gold-bright), var(--jc-gold));
+  /* Dark text on gold: the only combination here that clears contrast on a
+     light accent. Ivory on gold does not. */
+  color: #15110a;
+  border-color: var(--jc-gold-deep);
+}
+
+.jc-btn-primary:hover:not(:disabled) {
+  background: linear-gradient(180deg, #f7e6b8, var(--jc-gold-bright));
+}
+
+.jc-btn-secondary {
+  background: var(--jc-surface-raised);
+  color: var(--jc-text);
+  border-color: var(--jc-border-strong);
+}
+
+.jc-btn-secondary:hover:not(:disabled) { border-color: var(--jc-gold); }
+
+.jc-btn-ghost { background: transparent; color: var(--jc-text-secondary); }
+.jc-btn-ghost:hover:not(:disabled) { color: var(--jc-text); }
+
+.jc-btn-block { width: 100%; }
+
+/* ---------------------------------------------------------------------------
+   Forms
+   --------------------------------------------------------------------------- */
+
+.jc-field { display: flex; flex-direction: column; gap: 6px; }
+
+.jc-label { font-size: 0.875rem; font-weight: 500; color: var(--jc-text-secondary); }
+
+.jc-input {
+  width: 100%;
+  min-height: 46px;
+  padding: 0 14px;
+  background: var(--jc-surface-sunken);
+  border: 1px solid var(--jc-border-strong);
+  border-radius: var(--jc-r-sm);
+  color: var(--jc-text);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.jc-input::placeholder { color: var(--jc-text-muted); }
+
+.jc-input:focus {
+  outline: none;
+  border-color: var(--jc-gold);
+  box-shadow: 0 0 0 3px var(--jc-gold-ring);
+}
+
+.jc-input[aria-invalid="true"] { border-color: var(--jc-down); }
+
+.jc-checkbox-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 0.875rem;
+  color: var(--jc-text-secondary);
+}
+
+.jc-checkbox-row input[type="checkbox"] {
+  /* 18px keeps the hit target reachable without a custom control. */
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  accent-color: var(--jc-gold);
+  flex-shrink: 0;
+}
+
+.jc-field-error { font-size: 0.8125rem; color: var(--jc-down); }
+
+/* ---------------------------------------------------------------------------
+   Alerts
+   --------------------------------------------------------------------------- */
+
+.jc-alert {
+  display: flex;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid;
+  border-radius: var(--jc-r-sm);
+  font-size: 0.875rem;
+  line-height: 1.45;
+}
+
+.jc-alert-error { background: var(--jc-down-soft); border-color: rgb(226 87 76 / 0.35); color: #f2b3ae; }
+.jc-alert-success { background: var(--jc-up-soft); border-color: rgb(63 178 127 / 0.35); color: #9fdcc0; }
+.jc-alert-info { background: var(--jc-gold-soft); border-color: var(--jc-gold-ring); color: var(--jc-gold-bright); }
+
+/* ---------------------------------------------------------------------------
+   Badges
+   --------------------------------------------------------------------------- */
+
+.jc-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border: 1px solid var(--jc-border-strong);
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--jc-text-secondary);
+}
+
+.jc-badge-gold { border-color: var(--jc-gold-ring); background: var(--jc-gold-soft); color: var(--jc-gold-bright); }
+.jc-badge-muted { color: var(--jc-text-muted); }
+
+/* ---------------------------------------------------------------------------
+   Auth screens
+   --------------------------------------------------------------------------- */
+
+.jc-auth {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 32px 16px;
+  /* A single soft gold wash behind the card, so the page has depth without
+     resorting to a busy gradient. */
+  background:
+    radial-gradient(90ch 60ch at 50% -20%, rgb(212 175 85 / 0.07), transparent 70%),
+    var(--jc-bg);
+}
+
+.jc-auth-card { width: 100%; max-width: 440px; }
+
+.jc-auth-header { text-align: center; margin-bottom: 28px; }
+
+.jc-auth-title { font-size: 1.5rem; margin-bottom: 6px; }
+
+.jc-auth-footer {
+  margin-top: 20px;
+  text-align: center;
+  font-size: 0.875rem;
+  color: var(--jc-text-secondary);
+}
+
+.jc-link { color: var(--jc-gold); font-weight: 500; }
+.jc-link:hover { color: var(--jc-gold-bright); text-decoration: underline; }
+
+/* ---------------------------------------------------------------------------
+   Utility
+   --------------------------------------------------------------------------- */
+
+.jc-divider { height: 1px; background: var(--jc-border); border: 0; }
+
+.jc-sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

@@ -132,6 +132,71 @@ end;
 $$;
 
 -- =============================================================================
+-- §22 — the seeded TIER_0 ceilings match the approved product spec
+--
+-- This block exists because the seed and the spec drifted apart once already:
+-- 011 shipped the Exchange and Trade SINGLE window at 2,000 while the product
+-- called for 5,000, and nothing caught it. Asserting the configured figures
+-- here turns that class of mistake into a failing test instead of a discovery.
+--
+-- Deliberately asserting the DATABASE's values, not the engine's arithmetic —
+-- the engine is tested separately against synthetic ceilings, which is what
+-- keeps these two kinds of regression distinguishable.
+-- =============================================================================
+
+do $$
+declare
+  v_op   text;
+  v_win  text;
+begin
+  -- Exchange and Trade: USD 5,000 across all three windows.
+  foreach v_op in array array['SWAP', 'TRADE'] loop
+    foreach v_win in array array['SINGLE', 'DAILY', 'MONTHLY'] loop
+      perform pg_temp.holds(
+        format('§22 TIER_0 %s %s ceiling is USD 5,000', v_op, v_win),
+        (select max_amount = 5000 and quote_currency = 'USD'
+           from public.tier_limits
+          where tier_code = 'TIER_0'
+            and operation::text = v_op
+            and window_kind::text = v_win
+            and is_active));
+    end loop;
+  end loop;
+
+  -- Withdrawals are intentionally tighter than the Exchange ceiling: funds
+  -- leaving the platform carry a different risk profile from funds moving
+  -- within it. If someone raises these to match, this fails and asks why.
+  perform pg_temp.holds('§22 TIER_0 crypto withdrawal stays tighter than exchange',
+    (select max_amount = 1000 from public.tier_limits
+      where tier_code = 'TIER_0' and operation = 'CRYPTO_WITHDRAWAL'
+        and window_kind = 'SINGLE' and is_active));
+
+  perform pg_temp.holds('§22 TIER_0 fiat withdrawal stays tighter than exchange',
+    (select max_amount = 1000 from public.tier_limits
+      where tier_code = 'TIER_0' and operation = 'FIAT_WITHDRAWAL'
+        and window_kind = 'SINGLE' and is_active));
+
+  -- The ladder must stay monotonic: a higher tier that permitted LESS than a
+  -- lower one would make the REQUIRE_KYC upgrade suggestion nonsense.
+  perform pg_temp.holds('§21 the tier ladder never decreases a ceiling',
+    not exists (
+      select 1
+      from public.tier_limits lo
+      join public.account_tiers tlo on tlo.code = lo.tier_code
+      join public.tier_limits hi
+        on hi.operation = lo.operation
+       and hi.window_kind = lo.window_kind
+      join public.account_tiers thi on thi.code = hi.tier_code
+      where thi.rank > tlo.rank
+        and lo.is_active and hi.is_active
+        and lo.max_amount is not null
+        and hi.max_amount is not null
+        and hi.max_amount < lo.max_amount
+    ));
+end;
+$$;
+
+-- =============================================================================
 -- §19.1, §19.2, §19.3, §18 — ledger and wallet core
 -- =============================================================================
 

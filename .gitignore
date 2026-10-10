@@ -1,0 +1,27 @@
+# Dependencies
+/node_modules
+/.pnp
+.pnp.*
+
+# Next.js
+/.next/
+/out/
+/build
+next-env.d.ts
+*.tsbuildinfo
+
+# Environment. .env holds SUPABASE_SERVICE_ROLE_KEY, which bypasses RLS and so
+# bypasses every access rule in this repository. It must never be committed.
+.env
+.env.*
+!.env.example
+
+# Local test cluster created by scripts/test-db.sh
+/tmp-pgtest/
+
+# Editor / OS
+.DS_Store
+*.pem
+.vercel
+npm-debug.log*
+yarn-error.log*

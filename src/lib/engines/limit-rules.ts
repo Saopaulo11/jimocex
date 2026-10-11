@@ -1,15 +1,30 @@
+import {
+  ZERO,
+  addMoney,
+  compareMoney,
+  formatMoney,
+  greaterThan,
+  lessThan,
+  type Money,
+} from "../money.ts";
 import type { Database } from "@/lib/supabase/database.types";
 
 /**
  * The LimitEngine's decision logic, with no I/O (spec §12, §25).
  *
- * Separated from the database access in `limit-engine.ts` for one reason: this
- * is the part that decides whether money is allowed to move, and a decision
- * that important should be testable without a network, a database or a mock
- * that might drift from the real client's behaviour. Everything here is a pure
- * function of its arguments.
+ * The money import below is relative, not aliased: this module is executed
+ * directly by `node --test`, which does not resolve `@/`. The Database import
+ * can stay aliased because it is type-only and erased before Node sees it.
  *
- * No `server-only` import: nothing here reads a secret or touches a connection.
+ * Separated from the database access in `limit-engine.ts` because this is the
+ * part that decides whether money is allowed to move, and a decision that
+ * important should be testable without a network, a database, or a mock that
+ * can drift from the thing it imitates. Everything here is a pure function of
+ * its arguments.
+ *
+ * Every amount is a `Money` — an exact BigInt scaled by 10^18, matching
+ * numeric(38,18). There is no float anywhere in this file, and the module
+ * exposes no way to introduce one: the arithmetic all comes from @/lib/money.
  */
 
 export type LimitOperation = Database["public"]["Enums"]["limit_operation"];
@@ -19,13 +34,14 @@ export type AccountStatus = Database["public"]["Enums"]["account_status"];
 export type LimitRule = {
   window: LimitWindow;
   quoteCurrency: string;
-  /** Decimal string, or null for "this rule sets no ceiling". */
-  max: string | null;
-  min: string | null;
+  /** null means "this rule sets no ceiling". */
+  max: Money | null;
+  min: Money | null;
 };
 
 export type EvaluatedLimit = {
   window: LimitWindow;
+  /** Decimal strings, for display and logging. */
   amount: string;
   used: string;
   max: string | null;
@@ -39,52 +55,10 @@ export type LimitDecision =
   | { decision: "BLOCK"; reason: string; evaluated: EvaluatedLimit[] }
   | { decision: "UNAVAILABLE"; reason: string };
 
-/* ---------------------------------------------------------------------------
-   Decimal arithmetic
-   ---------------------------------------------------------------------------
-
-   Scaled BigInt, 18 fractional digits, matching the database's
-   numeric(38,18). Deliberately not `Number`: a float cannot represent 18
-   decimal places, and 0.1 + 0.2 !== 0.3 is not an acceptable property for the
-   comparison that decides whether a withdrawal proceeds.
-   --------------------------------------------------------------------------- */
-
-const SCALE = 18;
-const SCALE_FACTOR = 10n ** BigInt(SCALE);
-
-export function toScaled(decimal: string): bigint {
-  const trimmed = decimal.trim();
-  if (!/^-?\d+(\.\d+)?$/.test(trimmed)) {
-    throw new Error(`not a decimal number: ${JSON.stringify(decimal)}`);
-  }
-  const negative = trimmed.startsWith("-");
-  const unsigned = negative ? trimmed.slice(1) : trimmed;
-  const [whole = "0", fraction = ""] = unsigned.split(".");
-  // Truncate rather than round beyond 18 places: rounding up here would invent
-  // value that the database column cannot hold anyway.
-  const padded = (fraction + "0".repeat(SCALE)).slice(0, SCALE);
-  const value = BigInt(whole) * SCALE_FACTOR + BigInt(padded || "0");
-  return negative ? -value : value;
-}
-
-export function fromScaled(value: bigint): string {
-  const negative = value < 0n;
-  const abs = negative ? -value : value;
-  const whole = abs / SCALE_FACTOR;
-  const fraction = (abs % SCALE_FACTOR).toString().padStart(SCALE, "0").replace(/0+$/, "");
-  const text = fraction ? `${whole}.${fraction}` : whole.toString();
-  return negative ? `-${text}` : text;
-}
-
-/** `a * b`, both scaled, result scaled. */
-export function multiplyScaled(a: bigint, b: bigint): bigint {
-  return (a * b) / SCALE_FACTOR;
-}
-
 /**
  * Statuses from which no financial operation proceeds (spec §9).
  *
- * RESTRICTED is intentionally not here: a restricted account is judged per
+ * RESTRICTED is intentionally absent: a restricted account is judged per
  * operation by RiskEngine, not barred outright.
  */
 export const STATUSES_BARRED_FROM_OPERATIONS: readonly AccountStatus[] = [
@@ -96,24 +70,24 @@ export const STATUSES_BARRED_FROM_OPERATIONS: readonly AccountStatus[] = [
 export type EvaluateInput = {
   accountStatus: AccountStatus;
   /**
-   * The operation's value in the limit currency, as a decimal string — or null
-   * when it could not be determined.
+   * The operation's value in the limit currency — or null when it could not be
+   * determined.
    *
-   * null is the single most important input here. It means no market data
-   * provider could value the asset, and the only correct response is to refuse
-   * (spec §13). It must never be coerced to 0, which would read as "costs
-   * nothing" and pass every ceiling.
+   * null is the most important input here. It means no market data provider
+   * could value the asset, and the only correct response is to refuse
+   * (spec §13). It must never be coerced to zero, which would read as "costs
+   * nothing" and clear every ceiling.
    */
-  amountInQuote: string | null;
+  amountInQuote: Money | null;
   rules: LimitRule[];
-  /** Consumed so far per window, as decimal strings. Absent means zero. */
-  usage: Partial<Record<LimitWindow, string>>;
+  /** Consumed so far per window. An absent window counts as zero. */
+  usage: Partial<Record<LimitWindow, Money>>;
   /**
-   * Ceilings at higher tiers for the window that was breached, so the engine can
-   * answer REQUIRE_KYC naming a tier instead of a flat refusal. Ordered by rank
+   * Ceilings at higher tiers for the breached window, so the engine can answer
+   * REQUIRE_KYC naming a tier instead of refusing flatly. Ordered by rank
    * ascending; a null max means that tier sets no ceiling.
    */
-  higherTiers?: { code: string; max: string | null }[];
+  higherTiers?: { code: string; max: Money | null }[];
 };
 
 export function evaluateLimits(input: EvaluateInput): LimitDecision {
@@ -139,9 +113,9 @@ export function evaluateLimits(input: EvaluateInput): LimitDecision {
     };
   }
 
-  // The refusal that spec §13 exists for. Without a conversion the engine
-  // cannot know whether any ceiling is breached, and approving on an
-  // approximate rate is not an option.
+  // The refusal spec §13 exists for. Without a conversion the engine cannot
+  // know whether any ceiling is breached, and approving on an approximate rate
+  // is not an option.
   if (input.amountInQuote === null) {
     return {
       decision: "UNAVAILABLE",
@@ -149,32 +123,28 @@ export function evaluateLimits(input: EvaluateInput): LimitDecision {
     };
   }
 
-  const amount = toScaled(input.amountInQuote);
+  const amount = input.amountInQuote;
   const evaluated: EvaluatedLimit[] = [];
   let breached: LimitWindow | null = null;
   let belowMinimum = false;
 
   for (const rule of input.rules) {
-    const usedRaw = rule.window === "SINGLE" ? "0" : (input.usage[rule.window] ?? "0");
-    const used = toScaled(usedRaw);
+    const used = rule.window === "SINGLE" ? ZERO : (input.usage[rule.window] ?? ZERO);
 
-    const max = rule.max === null ? null : toScaled(rule.max);
-    const min = rule.min === null ? null : toScaled(rule.min);
+    // SINGLE bounds this operation alone; a rolling window bounds it on top of
+    // what the window has already consumed.
+    const total = rule.window === "SINGLE" ? amount : addMoney(used, amount);
+    const withinLimit = rule.max === null || !greaterThan(total, rule.max);
 
-    // SINGLE compares this operation alone; the rolling windows compare it on
-    // top of what the window has already consumed.
-    const total = rule.window === "SINGLE" ? amount : used + amount;
-    const withinLimit = max === null || total <= max;
-
-    if (min !== null && amount < min) belowMinimum = true;
+    if (rule.min !== null && lessThan(amount, rule.min)) belowMinimum = true;
     if (!withinLimit && breached === null) breached = rule.window;
 
     evaluated.push({
       window: rule.window,
-      amount: fromScaled(amount),
-      used: fromScaled(used),
-      max: max === null ? null : fromScaled(max),
-      min: min === null ? null : fromScaled(min),
+      amount: formatMoney(amount),
+      used: formatMoney(used),
+      max: rule.max === null ? null : formatMoney(rule.max),
+      min: rule.min === null ? null : formatMoney(rule.min),
       withinLimit,
     });
   }
@@ -194,7 +164,7 @@ export function evaluateLimits(input: EvaluateInput): LimitDecision {
   // Over the limit is not automatically a refusal. If verification would lift
   // the ceiling, say so and name the tier (spec §11, §23).
   const upgrade = (input.higherTiers ?? []).find(
-    (tier) => tier.max === null || toScaled(tier.max) >= amount,
+    (tier) => tier.max === null || compareMoney(tier.max, amount) >= 0,
   );
 
   if (upgrade) {

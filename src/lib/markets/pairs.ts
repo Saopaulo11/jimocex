@@ -1,7 +1,7 @@
 import "server-only";
 
 import { getMarketDataProvider } from "@/lib/providers/market-data";
-import { toDecimalString } from "@/lib/money";
+import { moneySelect } from "@/lib/db/money-columns";
 import { createClient } from "@/lib/supabase/server";
 import type { Market, MarketsResult } from "./types";
 
@@ -30,19 +30,37 @@ export async function listMarkets(): Promise<MarketsResult> {
     // policy, so this works signed out — which is what /markets needs.
     const { data, error } = await supabase
       .from("trading_pairs")
+      // min_order_size is numeric(38,18); moneySelect casts it to text so the
+      // exact value survives PostgREST's JSON serialisation.
       .select(
-        "symbol, pair_type, trading_enabled, swap_enabled, price_precision, amount_precision, min_order_size, base:base_asset_id(symbol), quote:quote_asset_id(symbol)",
+        moneySelect(
+          "trading_pairs",
+          "symbol, pair_type, trading_enabled, swap_enabled, price_precision, amount_precision, min_order_size, base:base_asset_id(symbol), quote:quote_asset_id(symbol)",
+        ),
       )
       .eq("is_active", true)
-      .order("display_order", { ascending: true });
+      .order("display_order", { ascending: true })
+      .overrideTypes<
+        {
+          symbol: string;
+          pair_type: Market["type"];
+          trading_enabled: boolean;
+          swap_enabled: boolean;
+          price_precision: number;
+          amount_precision: number;
+          min_order_size: string;
+          base: { symbol: string } | null;
+          quote: { symbol: string } | null;
+        }[]
+      >();
 
     if (error || !data) return { markets: [], configured: false, pricesAvailable };
 
     const markets = data.flatMap((row) => {
       // The embedded relations come back as objects; guard rather than assert,
       // so a schema change surfaces as a missing row instead of a crash.
-      const base = (row.base as { symbol: string } | null)?.symbol;
-      const quote = (row.quote as { symbol: string } | null)?.symbol;
+      const base = row.base?.symbol;
+      const quote = row.quote?.symbol;
       if (!base || !quote) return [];
 
       return [
@@ -55,7 +73,7 @@ export async function listMarkets(): Promise<MarketsResult> {
           swapEnabled: row.swap_enabled,
           pricePrecision: row.price_precision,
           amountPrecision: row.amount_precision,
-          minOrderSize: toDecimalString(row.min_order_size),
+          minOrderSize: row.min_order_size,
         } satisfies Market,
       ];
     });

@@ -1,13 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-import {
-  evaluateLimits,
-  fromScaled,
-  toScaled,
-  type EvaluateInput,
-  type LimitRule,
-} from "../limit-rules.ts";
+import { evaluateLimits, type EvaluateInput, type LimitRule } from "../limit-rules.ts";
+import { parseMoney, type Money } from "../../money.ts";
 
 /**
  * LimitEngine decision tests (spec §25).
@@ -22,38 +17,22 @@ import {
  * it imitates, and then the test passes while the product is broken.
  */
 
+/** Reads as a decimal in the tests; stored as exact Money. */
+const m = (value: string): Money => parseMoney(value);
+const maybe = (value: string | null): Money | null => (value === null ? null : parseMoney(value));
+
 const usdSingle = (max: string | null, min: string | null = null): LimitRule => ({
   window: "SINGLE",
   quoteCurrency: "USD",
-  max,
-  min,
+  max: maybe(max),
+  min: maybe(min),
 });
 
 const usdDaily = (max: string | null): LimitRule => ({
   window: "DAILY",
   quoteCurrency: "USD",
-  max,
+  max: maybe(max),
   min: null,
-});
-
-describe("decimal arithmetic", () => {
-  test("round-trips values a float would corrupt", () => {
-    for (const value of ["0.1", "0.2", "0.3", "1234567890.123456789", "0.000000000000000001"]) {
-      assert.equal(fromScaled(toScaled(value)), value);
-    }
-  });
-
-  test("0.1 + 0.2 is exactly 0.3, which it is not in floating point", () => {
-    assert.equal(fromScaled(toScaled("0.1") + toScaled("0.2")), "0.3");
-    // The contrast this exists to prevent:
-    assert.notEqual(0.1 + 0.2, 0.3);
-  });
-
-  test("rejects anything that is not a decimal number", () => {
-    for (const bad of ["", "abc", "1e5", "1,000", "Infinity", "NaN", "0x10"]) {
-      assert.throws(() => toScaled(bad), /not a decimal number/);
-    }
-  });
 });
 
 describe("§25.12 a missing market conversion cannot silently pass a limit", () => {
@@ -91,7 +70,7 @@ describe("§25.12 a missing market conversion cannot silently pass a limit", () 
     });
     const asZero = evaluateLimits({
       accountStatus: "ACTIVE",
-      amountInQuote: "0",
+      amountInQuote: m("0"),
       rules: [usdSingle("5000")],
       usage: {},
     });
@@ -106,7 +85,7 @@ describe("§25.8 limits are evaluated server-side from configured rules", () => 
   test("allows an amount inside the ceiling", () => {
     const result = evaluateLimits({
       accountStatus: "ACTIVE",
-      amountInQuote: "1000",
+      amountInQuote: m("1000"),
       rules: [usdSingle("2000")],
       usage: {},
     });
@@ -116,7 +95,7 @@ describe("§25.8 limits are evaluated server-side from configured rules", () => 
   test("refuses an amount above the ceiling", () => {
     const result = evaluateLimits({
       accountStatus: "ACTIVE",
-      amountInQuote: "2500",
+      amountInQuote: m("2500"),
       rules: [usdSingle("2000")],
       usage: {},
     });
@@ -126,7 +105,7 @@ describe("§25.8 limits are evaluated server-side from configured rules", () => 
   test("the boundary is inclusive: exactly at the ceiling is allowed", () => {
     const result = evaluateLimits({
       accountStatus: "ACTIVE",
-      amountInQuote: "2000",
+      amountInQuote: m("2000"),
       rules: [usdSingle("2000")],
       usage: {},
     });
@@ -136,7 +115,7 @@ describe("§25.8 limits are evaluated server-side from configured rules", () => 
   test("one unit over the ceiling, at 18 decimal places, is refused", () => {
     const result = evaluateLimits({
       accountStatus: "ACTIVE",
-      amountInQuote: "2000.000000000000000001",
+      amountInQuote: m("2000.000000000000000001"),
       rules: [usdSingle("2000")],
       usage: {},
     });
@@ -146,17 +125,17 @@ describe("§25.8 limits are evaluated server-side from configured rules", () => 
   test("a rolling window counts what has already been consumed", () => {
     const within = evaluateLimits({
       accountStatus: "ACTIVE",
-      amountInQuote: "1000",
+      amountInQuote: m("1000"),
       rules: [usdDaily("5000")],
-      usage: { DAILY: "4000" },
+      usage: { DAILY: m("4000") },
     });
     assert.equal(within.decision, "ALLOW");
 
     const over = evaluateLimits({
       accountStatus: "ACTIVE",
-      amountInQuote: "1001",
+      amountInQuote: m("1001"),
       rules: [usdDaily("5000")],
-      usage: { DAILY: "4000" },
+      usage: { DAILY: m("4000") },
     });
     assert.notEqual(over.decision, "ALLOW");
   });
@@ -164,9 +143,9 @@ describe("§25.8 limits are evaluated server-side from configured rules", () => 
   test("SINGLE ignores prior usage; it bounds this operation alone", () => {
     const result = evaluateLimits({
       accountStatus: "ACTIVE",
-      amountInQuote: "1000",
+      amountInQuote: m("1000"),
       rules: [usdSingle("2000")],
-      usage: { SINGLE: "999999" },
+      usage: { SINGLE: m("999999") },
     });
     assert.equal(result.decision, "ALLOW");
   });
@@ -174,7 +153,7 @@ describe("§25.8 limits are evaluated server-side from configured rules", () => 
   test("an unconfigured operation is refused, not waved through", () => {
     const result = evaluateLimits({
       accountStatus: "ACTIVE",
-      amountInQuote: "1",
+      amountInQuote: m("1"),
       rules: [],
       usage: {},
     });
@@ -184,7 +163,7 @@ describe("§25.8 limits are evaluated server-side from configured rules", () => 
   test("a null ceiling means no limit from that rule", () => {
     const result = evaluateLimits({
       accountStatus: "ACTIVE",
-      amountInQuote: "999999999",
+      amountInQuote: m("999999999"),
       rules: [usdSingle(null)],
       usage: {},
     });
@@ -194,7 +173,7 @@ describe("§25.8 limits are evaluated server-side from configured rules", () => 
   test("an amount below the minimum is refused", () => {
     const result = evaluateLimits({
       accountStatus: "ACTIVE",
-      amountInQuote: "5",
+      amountInQuote: m("5"),
       rules: [usdSingle("2000", "10")],
       usage: {},
     });
@@ -204,9 +183,9 @@ describe("§25.8 limits are evaluated server-side from configured rules", () => 
   test("the tightest window wins when several apply", () => {
     const result = evaluateLimits({
       accountStatus: "ACTIVE",
-      amountInQuote: "1500",
+      amountInQuote: m("1500"),
       rules: [usdSingle("2000"), usdDaily("5000")],
-      usage: { DAILY: "4000" },
+      usage: { DAILY: m("4000") },
     });
     // Inside SINGLE, but 4000 + 1500 breaches DAILY.
     assert.notEqual(result.decision, "ALLOW");
@@ -217,12 +196,12 @@ describe("§11 exceeding a limit suggests verification where that would help", (
   test("REQUIRE_KYC names the tier that would permit the amount", () => {
     const result = evaluateLimits({
       accountStatus: "ACTIVE",
-      amountInQuote: "10000",
+      amountInQuote: m("10000"),
       rules: [usdSingle("2000")],
       usage: {},
       higherTiers: [
-        { code: "TIER_1", max: "50000" },
-        { code: "TIER_2", max: "250000" },
+        { code: "TIER_1", max: m("50000") },
+        { code: "TIER_2", max: m("250000") },
       ],
     });
 
@@ -233,12 +212,12 @@ describe("§11 exceeding a limit suggests verification where that would help", (
   test("picks the lowest tier that suffices, not the highest", () => {
     const result = evaluateLimits({
       accountStatus: "ACTIVE",
-      amountInQuote: "100000",
+      amountInQuote: m("100000"),
       rules: [usdSingle("2000")],
       usage: {},
       higherTiers: [
-        { code: "TIER_1", max: "50000" },
-        { code: "TIER_2", max: "250000" },
+        { code: "TIER_1", max: m("50000") },
+        { code: "TIER_2", max: m("250000") },
       ],
     });
 
@@ -248,10 +227,10 @@ describe("§11 exceeding a limit suggests verification where that would help", (
   test("BLOCKs when no higher tier would permit the amount", () => {
     const result = evaluateLimits({
       accountStatus: "ACTIVE",
-      amountInQuote: "10000000",
+      amountInQuote: m("10000000"),
       rules: [usdSingle("2000")],
       usage: {},
-      higherTiers: [{ code: "TIER_1", max: "50000" }],
+      higherTiers: [{ code: "TIER_1", max: m("50000") }],
     });
 
     assert.equal(result.decision, "BLOCK");
@@ -260,7 +239,7 @@ describe("§11 exceeding a limit suggests verification where that would help", (
   test("a higher tier with no ceiling always suffices", () => {
     const result = evaluateLimits({
       accountStatus: "ACTIVE",
-      amountInQuote: "10000000",
+      amountInQuote: m("10000000"),
       rules: [usdSingle("2000")],
       usage: {},
       higherTiers: [{ code: "TIER_3", max: null }],
@@ -274,7 +253,7 @@ describe("§25.7 account status gates financial operations", () => {
   test("a SUSPENDED account is blocked even within its limits", () => {
     const result = evaluateLimits({
       accountStatus: "SUSPENDED",
-      amountInQuote: "1",
+      amountInQuote: m("1"),
       rules: [usdSingle("2000")],
       usage: {},
     });
@@ -285,7 +264,7 @@ describe("§25.7 account status gates financial operations", () => {
     for (const status of ["FROZEN", "CLOSED"] as const) {
       const result = evaluateLimits({
         accountStatus: status,
-        amountInQuote: "1",
+        amountInQuote: m("1"),
         rules: [usdSingle("2000")],
         usage: {},
       });
@@ -298,7 +277,7 @@ describe("§25.7 account status gates financial operations", () => {
     // with the "no policy configured" reason instead of the status reason.
     const result = evaluateLimits({
       accountStatus: "SUSPENDED",
-      amountInQuote: "1",
+      amountInQuote: m("1"),
       rules: [usdSingle("2000")],
       usage: {},
     });
@@ -308,7 +287,7 @@ describe("§25.7 account status gates financial operations", () => {
   test("RESTRICTED is not a blanket block — it is judged per operation", () => {
     const result = evaluateLimits({
       accountStatus: "RESTRICTED",
-      amountInQuote: "1000",
+      amountInQuote: m("1000"),
       rules: [usdSingle("2000")],
       usage: {},
     });
@@ -318,7 +297,7 @@ describe("§25.7 account status gates financial operations", () => {
   test("an ACTIVE account is not blocked by status", () => {
     const result = evaluateLimits({
       accountStatus: "ACTIVE",
-      amountInQuote: "1000",
+      amountInQuote: m("1000"),
       rules: [usdSingle("2000")],
       usage: {},
     });
@@ -346,7 +325,7 @@ describe("§25.9 and §25.10 the engine takes no authority from the caller", () 
     // as real inputs, and that even when forced through they change nothing.
     const injected: Record<string, unknown> = {
       accountStatus: "ACTIVE",
-      amountInQuote: "10000",
+      amountInQuote: m("10000"),
       rules: [usdSingle("2000")],
       usage: {},
       tier: "TIER_3",

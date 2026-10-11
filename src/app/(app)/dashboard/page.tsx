@@ -21,7 +21,8 @@ import {
   Th,
 } from "@/components/ui";
 import { requireUser } from "@/lib/auth/session";
-import { isNonZero, toDecimalString } from "@/lib/money";
+import { moneySelect } from "@/lib/db/money-columns";
+import { fromDatabase, isZero } from "@/lib/money";
 import { createClient } from "@/lib/supabase/server";
 
 export const metadata: Metadata = { title: "Overview" };
@@ -64,19 +65,34 @@ export default async function DashboardPage() {
       .single(),
     supabase
       .from("tier_limits")
-      .select("operation, window_kind, quote_currency, max_amount")
+      .select(moneySelect("tier_limits", "operation, window_kind, quote_currency, max_amount"))
       .eq("tier_code", viewer.profile.tier_code)
-      .eq("is_active", true),
-    supabase.from("wallets").select("id, available_balance, locked_balance"),
+      .eq("is_active", true)
+      // moneySelect builds the select at runtime, so supabase-js cannot infer
+      // the row shape from a literal. Declaring it here is also where the money
+      // columns are stated to be strings, which is the point of the cast.
+      .overrideTypes<
+        {
+          operation: string;
+          window_kind: string;
+          quote_currency: string;
+          max_amount: string | null;
+        }[]
+      >(),
+    supabase
+      .from("wallets")
+      .select(moneySelect("wallets", "id, available_balance, locked_balance"))
+      .overrideTypes<{ id: string; available_balance: string; locked_balance: string }[]>(),
   ]);
 
-  // Money arrives from the client as a JS number rather than an exact decimal —
-  // see the note at the top of @/lib/money. Nothing displayed here is affected
-  // yet (tier ceilings and minimum sizes are exactly representable), but every
-  // read goes through that boundary so the defect has one place to be fixed.
-  const hasFunds = (wallets ?? []).some(
-    (wallet) => isNonZero(wallet.available_balance) || isNonZero(wallet.locked_balance),
-  );
+  // Both balance columns were cast to text by moneySelect, so fromDatabase
+  // parses the exact decimal. If a cast is ever dropped it throws here naming
+  // the column, rather than silently comparing a rounded value.
+  const hasFunds = (wallets ?? []).some((wallet) => {
+    const available = fromDatabase(wallet.available_balance, "wallets.available_balance");
+    const locked = fromDatabase(wallet.locked_balance, "wallets.locked_balance");
+    return !isZero(available) || !isZero(locked);
+  });
 
   const sortedLimits = [...(limits ?? [])].sort((a, b) => {
     const byOperation =
@@ -241,7 +257,7 @@ export default async function DashboardPage() {
                       <span className="jc-muted">By arrangement</span>
                     ) : (
                       <CurrencyAmount
-                        value={toDecimalString(limit.max_amount)}
+                        value={limit.max_amount}
                         symbol={limit.quote_currency}
                         decimals={0}
                       />

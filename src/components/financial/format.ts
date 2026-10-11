@@ -1,84 +1,53 @@
 /**
- * Formatting for money and market figures.
+ * Display formatting for money and market figures.
  *
- * Everything here takes a DECIMAL STRING and returns a string. No value is ever
- * parsed into a JavaScript number on the way: `Number("0.1") + Number("0.2")`
- * is not 0.3, and a balance that has round-tripped through a float has already
- * lost precision before anything is displayed.
+ * Every function here takes a Money and delegates to `formatMoney()` in
+ * `@/lib/money`, so there is exactly one implementation of how an amount
+ * becomes text: one set of rules for sign, zero, grouping and truncation, one
+ * validator. A decimal string from the server is parsed into Money where it is
+ * read (`fromDatabase()`, `parseMoney()`), never re-split here — a second
+ * formatter working on raw strings would render "1e-8" as "1e-8.00" and
+ * "-0.001" at two places as "-0.00".
  *
  * These functions only format. They never compute an amount, a fee or a rate —
  * those come from the server, which is the only authority on them (spec §50).
+ *
+ * There is no default precision. How many places an amount shows is a property
+ * of its asset (`assets.decimals`) or its market (`trading_pairs.price_precision`)
+ * and the caller passes it; a guessed default shows 0.009 USDT as "0.00".
  */
 
-/** Splits a decimal string into sign, integer and fraction without arithmetic. */
-function parts(value: string): { sign: string; whole: string; fraction: string } {
-  const trimmed = value.trim();
-  const negative = trimmed.startsWith("-");
-  const unsigned = negative ? trimmed.slice(1) : trimmed.replace(/^\+/, "");
-  const [whole = "0", fraction = ""] = unsigned.split(".");
-  return { sign: negative ? "-" : "", whole: whole || "0", fraction };
-}
-
-function groupThousands(whole: string): string {
-  return whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-}
+import { formatMoney, type Money } from "@/lib/money";
 
 /**
- * Formats an amount for display.
- *
- * `decimals` truncates rather than rounds. Rounding a balance up would show
- * more than the customer has, which is the one direction a financial figure
- * must never be wrong in.
+ * An amount for display, grouped, truncated toward zero to `decimals` places —
+ * so the magnitude shown never exceeds the magnitude held.
  */
 export function formatAmount(
-  value: string,
-  options: { decimals?: number; minDecimals?: number; group?: boolean } = {},
+  value: Money,
+  options: { decimals: number; minDecimals?: number; group?: boolean },
 ): string {
   const { decimals, minDecimals = 0, group = true } = options;
-  const { sign, whole, fraction } = parts(value);
-
-  let out = fraction;
-  if (decimals !== undefined) out = out.slice(0, decimals);
-  while (out.length < minDecimals) out += "0";
-
-  const head = group ? groupThousands(whole) : whole;
-  return out ? `${sign}${head}.${out}` : `${sign}${head}`;
+  return formatMoney(value, { decimals, minDecimals: Math.min(minDecimals, decimals), group });
 }
 
 /**
- * Sensible display precision per asset class. Crypto needs more places than
- * fiat, and a price needs more than a balance.
+ * Direction of a figure AS DISPLAYED at `decimals` places. A change too small
+ * to show is flat, so the arrow never disagrees with the digits next to it.
  */
-export const ASSET_DECIMALS: Record<string, number> = {
-  BTC: 8,
-  ETH: 8,
-  SOL: 6,
-  TRX: 2,
-  USDT: 2,
-  USDC: 2,
-  USD: 2,
-  EUR: 2,
-  GBP: 2,
-  BRL: 2,
-  RUB: 2,
-};
-
-export function displayDecimals(symbol: string): number {
-  return ASSET_DECIMALS[symbol] ?? 8;
+export function signOf(value: Money, decimals = 18): "up" | "down" | "flat" {
+  const shown = formatMoney(value, { decimals });
+  if (!/[1-9]/.test(shown)) return "flat";
+  return shown.startsWith("-") ? "down" : "up";
 }
 
-/** Sign of a decimal string, without converting it to a number. */
-export function signOf(value: string): "up" | "down" | "flat" {
-  const { sign, whole, fraction } = parts(value);
-  const isZero = /^0*$/.test(whole) && /^0*$/.test(fraction);
-  if (isZero) return "flat";
-  return sign === "-" ? "down" : "up";
-}
-
-/** "+2.41%" / "−1.08%" — always signed, so the direction is unambiguous. */
-export function formatPercent(value: string, decimals = 2): string {
-  const direction = signOf(value);
-  const magnitude = formatAmount(value.replace(/^-/, ""), { decimals, minDecimals: decimals });
+/**
+ * "+2.41%" / "−1.08%" — signed, so the direction is unambiguous. `value` is in
+ * percentage points: 2.41 means 2.41%.
+ */
+export function formatPercent(value: Money, decimals = 2): string {
+  const direction = signOf(value, decimals);
+  const magnitude = formatMoney(value, { decimals, minDecimals: decimals }).replace(/^-/, "");
   if (direction === "flat") return `${magnitude}%`;
   // U+2212 MINUS, not a hyphen: it aligns with the plus and with tabular digits.
   return `${direction === "up" ? "+" : "−"}${magnitude}%`;

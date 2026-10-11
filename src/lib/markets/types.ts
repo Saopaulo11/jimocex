@@ -1,4 +1,5 @@
-import type { Database } from "@/lib/supabase/database.types";
+import type { Database } from "@/lib/db/database";
+import type { DecimalString } from "@/lib/money";
 
 /**
  * Market shapes shared between the server and the client.
@@ -24,8 +25,8 @@ export type Market = {
   swapEnabled: boolean;
   pricePrecision: number;
   amountPrecision: number;
-  /** Decimal string — never a float. See @/lib/money. */
-  minOrderSize: string;
+  /** Exact decimal from trading_pairs.min_order_size — never a float. See @/lib/money. */
+  minOrderSize: DecimalString;
 };
 
 export type MarketsResult = {

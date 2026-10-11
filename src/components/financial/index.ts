@@ -26,10 +26,4 @@ export {
   WithdrawalStatus,
 } from "./Status";
 
-export {
-  ASSET_DECIMALS,
-  displayDecimals,
-  formatAmount,
-  formatPercent,
-  signOf,
-} from "./format";
+export { formatAmount, formatPercent, signOf } from "./format";

@@ -1312,27 +1312,21 @@ export type Database = {
         Returns: {
           created_at: string
           expires_at: string
-          fee: number
-          fee_asset_id: string | null
-          from_amount: number
+          fee: string
+          fee_asset_id: string
+          from_amount: string
           from_asset_id: string
           id: string
-          output_amount: number
-          rate: number
+          output_amount: string
+          rate: string
           rate_mode: Database["public"]["Enums"]["rate_mode"]
           rate_source: string
-          session_id: string | null
+          session_id: string
           status: Database["public"]["Enums"]["quote_status"]
           to_asset_id: string
-          used_at: string | null
-          user_id: string | null
-        }
-        SetofOptions: {
-          from: "*"
-          to: "swap_quotes"
-          isOneToOne: true
-          isSetofReturn: false
-        }
+          used_at: string
+          user_id: string
+        }[]
       }
       expire_stale_quotes: { Args: never; Returns: number }
       has_admin_role: {
@@ -1355,24 +1349,25 @@ export type Database = {
         }
         Returns: string
       }
-      limit_usage_in_window: {
+      limit_usage_total: {
         Args: {
           p_operation: Database["public"]["Enums"]["limit_operation"]
+          p_quote_currency: string
           p_since: string
           p_user_id: string
         }
-        Returns: number
+        Returns: string
       }
       mark_trade_settled: { Args: { p_trade_id: string }; Returns: boolean }
       reconcile_wallets: {
         Args: never
         Returns: {
           asset_id: string
-          ledger_available: number
-          ledger_locked: number
+          ledger_available: string
+          ledger_locked: string
           user_id: string
-          wallet_available: number
-          wallet_locked: number
+          wallet_available: string
+          wallet_locked: string
         }[]
       }
       release_withdrawal_hold: {

@@ -4,7 +4,7 @@ import { cache } from "react";
 
 import { AppError } from "@/lib/errors";
 import { createClient } from "@/lib/supabase/server";
-import type { Database } from "@/lib/supabase/database.types";
+import type { Database } from "@/lib/db/database";
 
 /**
  * The Data Access Layer (spec §3, §14).

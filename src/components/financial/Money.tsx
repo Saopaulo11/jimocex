@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
 
-import { displayDecimals, formatAmount, formatPercent, signOf } from "./format";
+import type { Money } from "@/lib/money";
+
+import { formatAmount, formatPercent, signOf } from "./format";
 
 /**
  * Financial display primitives (spec §21).
@@ -9,7 +11,9 @@ import { displayDecimals, formatAmount, formatPercent, signOf } from "./format";
  * these, which is what keeps precision, alignment and the up/down convention
  * identical on every screen.
  *
- * All of them take decimal strings. None accepts a number — see ./format.
+ * All of them take Money, parsed where the value was read (`fromDatabase()` for
+ * a column, `parseMoney()` for a decimal string from the server). None accepts
+ * a number or a raw string, and none guesses a precision — see ./format.
  */
 
 /**
@@ -23,13 +27,14 @@ export function CurrencyAmount({
   size = "md",
   className,
 }: {
-  value: string;
+  value: Money;
   symbol: string;
-  decimals?: number;
+  /** The asset's own precision — `assets.decimals`. */
+  decimals: number;
   size?: "sm" | "md" | "lg" | "xl";
   className?: string;
 }) {
-  const places = decimals ?? displayDecimals(symbol);
+  const places = decimals;
 
   return (
     <span
@@ -52,11 +57,12 @@ export function CurrencyAmount({
 export function Price({
   value,
   quoteSymbol,
-  decimals = 2,
+  decimals,
 }: {
-  value: string;
+  value: Money;
   quoteSymbol?: string;
-  decimals?: number;
+  /** The market's `price_precision`. */
+  decimals: number;
 }) {
   return (
     <span className="jc-numeric">
@@ -70,8 +76,8 @@ export function Price({
  * A 24h change. Direction is carried by the sign and by colour together —
  * never by colour alone, which fails for colour-blind users and in print.
  */
-export function PriceChange({ percent, decimals = 2 }: { percent: string; decimals?: number }) {
-  const direction = signOf(percent);
+export function PriceChange({ percent, decimals = 2 }: { percent: Money; decimals?: number }) {
+  const direction = signOf(percent, decimals);
 
   return (
     <span className={`jc-change jc-change--${direction}`}>
@@ -124,20 +130,23 @@ export function BalancePair({
   available,
   locked,
   symbol,
+  decimals,
 }: {
-  available: string;
-  locked: string;
+  available: Money;
+  locked: Money;
   symbol: string;
+  /** The asset's own precision — `assets.decimals`. */
+  decimals: number;
 }) {
   return (
     <div className="jc-stat-pair">
       <Stat
         label="Available"
-        value={<CurrencyAmount value={available} symbol={symbol} size="lg" />}
+        value={<CurrencyAmount value={available} symbol={symbol} decimals={decimals} size="lg" />}
       />
       <Stat
         label="Locked"
-        value={<CurrencyAmount value={locked} symbol={symbol} size="lg" />}
+        value={<CurrencyAmount value={locked} symbol={symbol} decimals={decimals} size="lg" />}
         hint="Reserved for open orders and pending withdrawals"
       />
     </div>

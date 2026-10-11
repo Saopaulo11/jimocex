@@ -3,7 +3,7 @@ import "server-only";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 
-import type { Database } from "./database.types";
+import type { Database } from "@/lib/db/database";
 
 /**
  * Supabase client for Server Components, Server Actions and Route Handlers.

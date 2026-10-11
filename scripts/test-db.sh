@@ -42,28 +42,40 @@ else
 fi
 
 PGDATA="$WORK/data"
-SOCK="$WORK/sock"
+# The socket lives in its own short directory: a Unix socket path is limited to
+# about 107 bytes, which a long JIMOCEX_TEST_DIR would otherwise exceed.
+SOCK="$(mktemp -d /tmp/jcx-sock.XXXXXX)"
 
 cleanup() {
+  local status=$?
   AS_PG "$BIN/pg_ctl -D $PGDATA stop -m immediate" >/dev/null 2>&1 || true
-  rm -rf "$WORK"
+  # Keep the server log long enough to explain a failure.
+  if [ "$status" -ne 0 ] && [ -f "$WORK/log" ]; then
+    echo "---- last lines of the PostgreSQL log ----" >&2
+    tail -n 40 "$WORK/log" >&2 || true
+  fi
+  rm -rf "$WORK" "$SOCK"
 }
 trap cleanup EXIT
 
 echo "==> fresh cluster in $WORK"
 rm -rf "$WORK"
-mkdir -p "$PGDATA" "$SOCK"
-chown -R "$OWNER" "$WORK"
+mkdir -p "$PGDATA"
+chown -R "$OWNER" "$WORK" "$SOCK"
 AS_PG "$BIN/initdb -D $PGDATA -A trust --locale=C --encoding=UTF8" >/dev/null
 AS_PG "$BIN/pg_ctl -D $PGDATA -o \"-k $SOCK -c listen_addresses=''\" -l $WORK/log start -w" >/dev/null
 AS_PG "$BIN/psql -h $SOCK -d postgres -q -c 'create database $DB'"
 
 PSQL() { AS_PG "$BIN/psql -h $SOCK -d $DB -v ON_ERROR_STOP=1 $*"; }
 
+# Each file runs as ONE transaction (-1), which is how the hosted project
+# applies a migration. Without it a failure halfway through would leave a
+# partially applied migration behind, and a function could sit between its
+# CREATE and its REVOKE with the default grants in effect.
 run_file() {
   local src="$1" dst="$WORK/$(basename "$1")"
   cp "$src" "$dst"; chmod 644 "$dst"
-  PSQL "-q -f $dst"
+  PSQL "-q -1 -f $dst"
 }
 
 echo "==> Supabase primitives (test scaffolding only)"
@@ -80,3 +92,12 @@ echo "==> invariant suite"
 src="$ROOT/supabase/tests/01_invariants.sql"
 cp "$src" "$WORK/inv.sql"; chmod 644 "$WORK/inv.sql"
 AS_PG "$BIN/psql -h $SOCK -d $DB -v ON_ERROR_STOP=1 -f $WORK/inv.sql"
+
+# The money registry (src/lib/db/money-columns.ts) is checked against the
+# catalog of the database the migrations actually built — not against a reading
+# of the migration text, which cannot see ALTER TABLE, casing or a column added
+# in an unusual way.
+echo "==> money registry vs. database catalog"
+cp "$ROOT/supabase/tests/02_money_catalog.sql" "$WORK/catalog.sql"; chmod 644 "$WORK/catalog.sql"
+AS_PG "$BIN/psql -h $SOCK -d $DB -v ON_ERROR_STOP=1 -qAt -f $WORK/catalog.sql -o $WORK/catalog.json"
+node --experimental-strip-types --no-warnings "$ROOT/scripts/check-money-catalog.ts" "$WORK/catalog.json"

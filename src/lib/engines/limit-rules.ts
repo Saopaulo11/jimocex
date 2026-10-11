@@ -4,10 +4,11 @@ import {
   compareMoney,
   formatMoney,
   greaterThan,
+  isPositive,
   lessThan,
   type Money,
 } from "../money.ts";
-import type { Database } from "@/lib/supabase/database.types";
+import type { Database } from "@/lib/db/database";
 
 /**
  * The LimitEngine's decision logic, with no I/O (spec §12, §25).
@@ -124,6 +125,15 @@ export function evaluateLimits(input: EvaluateInput): LimitDecision {
   }
 
   const amount = input.amountInQuote;
+
+  // A zero or negative amount moves nothing a limit could measure, and a
+  // negative one would REDUCE the window's running total — every ceiling would
+  // pass. Input parsing refuses both before this point (parseAmountInput); the
+  // engine refuses them again rather than trust that.
+  if (!isPositive(amount)) {
+    return { decision: "BLOCK", reason: "the amount must be greater than zero", evaluated: [] };
+  }
+
   const evaluated: EvaluatedLimit[] = [];
   let breached: LimitWindow | null = null;
   let belowMinimum = false;

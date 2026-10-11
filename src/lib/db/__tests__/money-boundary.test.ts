@@ -1,227 +1,204 @@
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
 import { describe, test } from "node:test";
 
-import { ALL_MONEY_COLUMN_NAMES, MONEY_COLUMNS, moneySelect } from "../money-columns.ts";
+import { ZERO, parseMoney } from "../../money.ts";
+import {
+  ALL_MONEY_COLUMN_NAMES,
+  DB_FUNCTIONS,
+  GENERATED_MONEY_COLUMNS,
+  JSON_COLUMNS,
+  LEDGER_ONLY_TABLES,
+  MONEY_COLUMNS,
+  NARROW_MONEY_COLUMNS,
+  moneySelect,
+  selectProblems,
+} from "../money-columns.ts";
+import { moneyArgs, moneyInsert, moneyUpdate } from "../money-write.ts";
 
 /**
- * Guards on the financial boundary itself.
+ * The money registry, the select builder and the write layer.
  *
- * The unit tests in money.test.ts prove the arithmetic is exact. These prove
- * something different and just as important: that no query in the codebase
- * bypasses it, and that the registry of money columns has not fallen behind the
- * schema.
- *
- * Both run as static analysis over the repository — no database, no network —
- * so they fail in CI the moment someone writes a select that would silently
- * round a balance.
+ * What this file does NOT do any more is check the registry against the
+ * migrations by reading their text: that approach could not see ALTER TABLE,
+ * casing, `decimal` or a column added in an unusual way, and it said otherwise.
+ * `npm run test:db` now compares the registry with the catalog of a database
+ * built from the migrations (scripts/check-money-catalog.ts). The scan of the
+ * application code for queries that bypass all this lives in
+ * money-guard.test.ts.
  */
 
-const ROOT = join(import.meta.dirname, "..", "..", "..", "..");
-const SRC = join(ROOT, "src");
-const MIGRATIONS = join(ROOT, "supabase", "migrations");
+const m = parseMoney;
 
-function sourceFiles(dir: string): string[] {
-  const out: string[] = [];
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const path = join(dir, entry.name);
-    if (entry.isDirectory()) out.push(...sourceFiles(path));
-    else if (/\.tsx?$/.test(entry.name) && !entry.name.endsWith(".test.ts")) out.push(path);
-  }
-  return out;
-}
-
-describe("moneySelect", () => {
-  test("casts money columns and leaves the rest alone", () => {
+describe("moneySelect casts every money and jsonb column to text", () => {
+  test("money columns of the table, and nothing else", () => {
     assert.equal(
-      moneySelect("wallets", "id, available_balance, locked_balance"),
-      "id, available_balance::text, locked_balance::text",
+      moneySelect("wallets", "id, asset_id, available_balance, locked_balance"),
+      "id, asset_id, available_balance::text, locked_balance::text",
     );
   });
 
-  test("leaves embedded relations untouched", () => {
+  test("keeps an alias and does not double an existing cast", () => {
+    assert.equal(
+      moneySelect("tier_limits", "ceiling:max_amount, min_amount::text"),
+      "ceiling:max_amount::text, min_amount::text",
+    );
+  });
+
+  test("casts money inside an embedded resource, whose table it cannot see", () => {
+    assert.equal(
+      moneySelect("wallets", "id, ledger:ledger_entries(amount, entry_type, available_delta)"),
+      "id, ledger:ledger_entries(amount::text, entry_type, available_delta::text)",
+    );
     assert.equal(
       moneySelect("trading_pairs", "symbol, min_order_size, base:base_asset_id(symbol)"),
       "symbol, min_order_size::text, base:base_asset_id(symbol)",
     );
   });
 
-  test("does not double an existing cast", () => {
-    assert.equal(
-      moneySelect("wallets", "available_balance::text"),
-      "available_balance::text",
-    );
+  test("reads jsonb as text, except a path that already yields text", () => {
+    assert.equal(moneySelect("ledger_entries", "id, metadata"), "id, metadata::text");
+    assert.equal(moneySelect("ledger_entries", "id, metadata->>amount"), "id, metadata->>amount");
+    assert.equal(moneySelect("ledger_entries", "id, metadata->amount"), "id, metadata->amount::text");
   });
 
-  test("preserves an alias", () => {
-    assert.equal(
-      moneySelect("wallets", "balance:available_balance"),
-      "balance:available_balance::text",
-    );
-  });
-
-  test("ignores columns of a table that holds no money", () => {
-    assert.equal(moneySelect("profiles", "id, email"), "id, email");
-  });
-});
-
-describe("the registry matches the schema", () => {
-  /**
-   * Reads the migrations rather than the live database, so this runs anywhere
-   * and still catches the real failure: a migration that adds a money column
-   * without registering it, after which every select of that column silently
-   * rounds.
-   */
-  const sql = readdirSync(MIGRATIONS)
-    .filter((f) => f.endsWith(".sql"))
-    .sort()
-    .map((f) => readFileSync(join(MIGRATIONS, f), "utf8"))
-    .join("\n");
-
-  /** Every `create table public.X ( ... )` body in migration order. */
-  function tableBodies(): Map<string, string> {
-    const tables = new Map<string, string>();
-    const pattern = /create table (?:if not exists )?public\.(\w+)\s*\(/g;
-
-    for (let match = pattern.exec(sql); match; match = pattern.exec(sql)) {
-      const name = match[1]!;
-      // Walk to the matching close paren so nested parens in types and checks
-      // do not end the body early.
-      let depth = 1;
-      let i = match.index + match[0].length;
-      while (i < sql.length && depth > 0) {
-        if (sql[i] === "(") depth += 1;
-        else if (sql[i] === ")") depth -= 1;
-        i += 1;
-      }
-      tables.set(name, sql.slice(match.index + match[0].length, i - 1));
-    }
-    return tables;
+  for (const [table, columns, reason] of [
+    ["wallets", "*", /reads every money column/],
+    ["wallets", "id, ledger_entries(*)", /inside an embedded resource/],
+    ["trades", "price::numeric", /cast to numeric/],
+    ["trades", "price::float8", /cast to float8/],
+    ["limit_usage", "usd_equivalent.sum()", /aggregate sum\(\)/],
+  ] as const) {
+    test(`refuses ${columns} on ${table}`, () => {
+      assert.throws(() => moneySelect(table, columns), reason);
+    });
   }
 
-  /**
-   * Columns that are `numeric` but deliberately not money.
-   *
-   * `risk_events.score` is numeric(10,4): a model output compared against a
-   * threshold, not a quantity anyone is paid, and exactly representable as a
-   * double. Listing the exception here means a NEW numeric column cannot be
-   * waved through by accident — it fails the test until someone classifies it.
-   */
-  const NOT_MONEY = new Set(["risk_events.score"]);
-
-  test("every numeric column in the schema is classified", () => {
-    const unregistered: string[] = [];
-
-    for (const [table, body] of tableBodies()) {
-      // A column line looks like `  name  numeric(38, 18) ...`.
-      const columnPattern = /^\s{2}(\w+)\s+numeric\s*\(/gm;
-      for (let m = columnPattern.exec(body); m; m = columnPattern.exec(body)) {
-        const column = m[1]!;
-        const qualified = `${table}.${column}`;
-        if (NOT_MONEY.has(qualified)) continue;
-
-        const registered = (MONEY_COLUMNS as Record<string, readonly string[]>)[table];
-        if (!registered?.includes(column)) unregistered.push(qualified);
-      }
-    }
-
-    assert.deepEqual(
-      unregistered,
-      [],
-      `numeric columns missing from MONEY_COLUMNS (add them, or add to NOT_MONEY with a reason): ${unregistered.join(", ")}`,
-    );
-  });
-
-  test("the registry lists no column the schema does not have", () => {
-    const bodies = tableBodies();
-    const missing: string[] = [];
-
-    for (const [table, columns] of Object.entries(MONEY_COLUMNS)) {
-      const body = bodies.get(table);
-      if (!body) {
-        missing.push(`${table} (table not found in migrations)`);
-        continue;
-      }
-      for (const column of columns) {
-        if (!new RegExp(`^\\s{2}${column}\\s+numeric\\s*\\(`, "m").test(body)) {
-          missing.push(`${table}.${column}`);
-        }
-      }
-    }
-
-    assert.deepEqual(missing, [], `registered columns not found as numeric in the schema: ${missing.join(", ")}`);
+  test("refuses a table it does not know, rather than passing the text through", () => {
+    // @ts-expect-error — the parameter is typed; this is the runtime half.
+    assert.throws(() => moneySelect("wallet", "available_balance"), /holds no money/);
   });
 });
 
-describe("no query bypasses the boundary", () => {
-  /**
-   * Scans every source file for a `.select("…")` literal naming a money column
-   * without a cast.
-   *
-   * This is the test that would have caught the original defect. Reading a
-   * money column raw is not a style problem — it is a silently rounded balance,
-   * and it looks completely normal in review.
-   */
-  test("no raw .select() reads a money column", () => {
-    const offenders: string[] = [];
-    const selectPattern = /\.select\(\s*(["'`])([^"'`]*)\1/g;
+describe("selectProblems — the check the static guard runs on a literal", () => {
+  test("a raw money column, a star and an uncast embed are each reported", () => {
+    assert.equal(selectProblems("wallets", "available_balance").length, 1);
+    assert.equal(selectProblems("wallets", "*").length, 1);
+    assert.equal(selectProblems("profiles", "user_id, wallets(available_balance)").length, 1);
+    assert.equal(selectProblems("profiles", "user_id, wallets(*)").length, 1);
+  });
 
-    for (const file of sourceFiles(SRC)) {
-      const text = readFileSync(file, "utf8");
+  test("the cast forms pass", () => {
+    assert.deepEqual(selectProblems("wallets", "id, available_balance::text, bal:locked_balance::text"), []);
+    assert.deepEqual(selectProblems("profiles", "*"), []);
+    assert.deepEqual(selectProblems("profiles", "user_id, wallets(available_balance::text)"), []);
+  });
+});
 
-      for (let m = selectPattern.exec(text); m; m = selectPattern.exec(text)) {
-        const columns = m[2]!;
-        // `select("*")` on a money table would also be unsafe, and is caught.
-        const named = columns
-          .split(",")
-          .map((c) => c.trim().split(":").pop()!.trim())
-          .filter(Boolean);
+describe("the registry is internally consistent", () => {
+  const moneyTables = Object.keys(MONEY_COLUMNS);
 
-        for (const column of named) {
-          const bare = column.replace(/\(.*/, "");
-          if (!ALL_MONEY_COLUMN_NAMES.includes(bare)) continue;
-          if (column.includes("::text")) continue;
-
-          offenders.push(`${file.replace(ROOT + "/", "")}: ${bare}`);
-        }
+  test("every generated, narrow and ledger-only entry names a registered money column", () => {
+    for (const [table, columns] of Object.entries(GENERATED_MONEY_COLUMNS)) {
+      for (const column of columns) {
+        assert.ok((MONEY_COLUMNS as Record<string, readonly string[]>)[table]?.includes(column), `${table}.${column}`);
       }
     }
+    for (const key of Object.keys(NARROW_MONEY_COLUMNS)) {
+      const [table = "", column = ""] = key.split(".");
+      assert.ok((MONEY_COLUMNS as Record<string, readonly string[]>)[table]?.includes(column), key);
+    }
+    for (const table of LEDGER_ONLY_TABLES) assert.ok(moneyTables.includes(table), table);
+  });
 
+  test("no name is both a money column and a jsonb column", () => {
+    const jsonNames = new Set<string>(Object.values(JSON_COLUMNS).flat());
+    for (const name of ALL_MONEY_COLUMN_NAMES) assert.ok(!jsonNames.has(name), name);
+  });
+
+  test("a function's money arguments are listed once", () => {
+    for (const [fn, entry] of Object.entries(DB_FUNCTIONS)) {
+      assert.equal(new Set(entry.args).size, entry.args.length, fn);
+    }
+  });
+});
+
+describe("the write layer serialises Money and refuses everything else", () => {
+  const user = "00000000-0000-4000-8000-000000000001";
+  const asset = "00000000-0000-4000-8000-000000000002";
+
+  test("money fields become exact decimal strings; others pass through", () => {
     assert.deepEqual(
-      offenders,
-      [],
-      `money columns selected without ::text — use moneySelect():\n  ${offenders.join("\n  ")}`,
+      moneyInsert("deposits", { user_id: user, asset_id: asset, amount: m("1234567890123456.123456789012345678") }),
+      { user_id: user, asset_id: asset, amount: "1234567890123456.123456789012345678" },
+    );
+    assert.deepEqual(moneyUpdate("tier_limits", { max_amount: null, is_active: false }), {
+      max_amount: null,
+      is_active: false,
+    });
+  });
+
+  test("a narrower column refuses digits it would round away", () => {
+    assert.deepEqual(moneyUpdate("fee_rules", { percentage: m("0.125") }), { percentage: "0.125" });
+    assert.throws(() => moneyUpdate("fee_rules", { percentage: m("0.1234565") }), /fee_rules\.percentage/);
+  });
+
+  test("a number, a string or a value out of range is refused, naming the column", () => {
+    // @ts-expect-error — a float forced through.
+    assert.throws(() => moneyInsert("deposits", { user_id: user, asset_id: asset, amount: 1.5 }), /deposits\.amount must be written from Money/);
+    // @ts-expect-error — a decimal string that skipped parseMoney.
+    assert.throws(() => moneyInsert("deposits", { user_id: user, asset_id: asset, amount: "1.5" }), /parse it with parseMoney/);
+    assert.throws(
+      () => moneyInsert("deposits", { user_id: user, asset_id: asset, amount: m("100000000000000000000") }),
+      /does not fit numeric\(38,18\)/,
     );
   });
 
-  test("no source file calls a money-returning RPC", () => {
-    // limit_usage_in_window returns numeric, and a function's return type cannot
-    // be cast at the call site the way a column can. The engine sums the rows
-    // itself instead; this keeps it that way.
-    const offenders: string[] = [];
-    for (const file of sourceFiles(SRC)) {
-      const text = readFileSync(file, "utf8");
-      if (text.includes('rpc("limit_usage_in_window"')) {
-        offenders.push(file.replace(ROOT + "/", ""));
-      }
-    }
-    assert.deepEqual(offenders, []);
+  test("ledger-only tables and generated columns cannot be written", () => {
+    // @ts-expect-error — wallets is not a writable table.
+    assert.throws(() => moneyInsert("wallets", {}), /ledger_post/);
+    // @ts-expect-error — net_amount is not in the update shape.
+    assert.throws(() => moneyUpdate("withdrawals", { net_amount: m("1") }), /computed by PostgreSQL/);
   });
 
-  test("no source file does float arithmetic on a money value", () => {
-    const banned = /\b(Number|parseFloat|parseInt)\s*\(\s*\w*(amount|price|fee|balance|rate|total)\w*/i;
-    const offenders: string[] = [];
+  test("a JSON number inside a jsonb value is refused, wherever it is nested", () => {
+    assert.throws(
+      // @ts-expect-error — ExactJson has no numbers; this is the runtime half.
+      () => moneyInsert("risk_events", { subject_type: "swap", decision: "REVIEW", details: { lines: [{ fee: 0.1 }] } }),
+      /risk_events\.details: \$\.lines\[0\]\.fee is a number/,
+    );
+    assert.deepEqual(
+      moneyInsert("risk_events", { subject_type: "swap", decision: "REVIEW", details: { fee: "0.1" } }),
+      { subject_type: "swap", decision: "REVIEW", details: { fee: "0.1" } },
+    );
+  });
 
-    for (const file of sourceFiles(SRC)) {
-      readFileSync(file, "utf8")
-        .split("\n")
-        .forEach((line, index) => {
-          if (line.trim().startsWith("*") || line.trim().startsWith("//")) return;
-          if (banned.test(line)) offenders.push(`${file.replace(ROOT + "/", "")}:${index + 1}`);
-        });
-    }
+  test("ledger_post arguments are serialised, its metadata checked", () => {
+    const args = moneyArgs("ledger_post", {
+      p_user_id: user,
+      p_asset_id: asset,
+      p_entry_type: "DEPOSIT",
+      p_amount: m("0.000000000000000001"),
+      p_available_delta: m("0.000000000000000001"),
+      p_locked_delta: ZERO,
+      p_metadata: { source: "test", fee: "0.1" },
+    });
+    assert.equal(args.p_amount, "0.000000000000000001");
+    assert.equal(args.p_locked_delta, "0");
+    assert.deepEqual(args.p_metadata, { source: "test", fee: "0.1" });
 
-    assert.deepEqual(offenders, [], `float coercion of a money value:\n  ${offenders.join("\n  ")}`);
+    assert.throws(
+      () =>
+        moneyArgs("ledger_post", {
+          p_user_id: user,
+          p_asset_id: asset,
+          p_entry_type: "DEPOSIT",
+          p_amount: m("1"),
+          p_available_delta: m("1"),
+          p_locked_delta: ZERO,
+          // @ts-expect-error — a number inside jsonb.
+          p_metadata: { fee: 0.1 },
+        }),
+      /ledger_post\(p_metadata\): \$\.fee is a number/,
+    );
   });
 });

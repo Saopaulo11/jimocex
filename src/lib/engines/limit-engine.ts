@@ -3,9 +3,9 @@ import "server-only";
 import { moneySelect } from "@/lib/db/money-columns";
 import { isAppError } from "@/lib/errors";
 import {
-  ZERO,
-  addMoney,
   fromDatabase,
+  fromDatabaseNullable,
+  isPositive,
   multiplyMoney,
   parseMoney,
   type Money,
@@ -32,7 +32,8 @@ import {
  * PostgreSQL renders the exact decimal instead of letting PostgREST serialise
  * it as a JSON number. `fromDatabase()` then parses it, and throws if a number
  * arrives anyway — so a dropped cast fails loudly here rather than quietly
- * approving an operation against a rounded ceiling.
+ * approving an operation against a rounded ceiling. Window usage is summed by
+ * `limit_usage_total()` in exact numeric and returned as text.
  *
  * What is NOT a parameter here, and cannot be: the tier, the limits, the fee,
  * the account status. Each is read from the database by the server-side user
@@ -46,8 +47,8 @@ export type LimitCheckInput = {
   operation: LimitOperation;
   /** Asset the amount is denominated in, e.g. "BTC". */
   assetSymbol: string;
-  /** Exact decimal string. Never a number — see @/lib/money. */
-  amount: string;
+  /** Already parsed — from a form with `parseAmountInput()`, never from a number. */
+  amount: Money;
 };
 
 export async function checkEligibility(input: LimitCheckInput): Promise<LimitDecision> {
@@ -70,7 +71,8 @@ export async function checkEligibility(input: LimitCheckInput): Promise<LimitDec
     .eq("operation", input.operation)
     .eq("is_active", true)
     .overrideTypes<
-      { window_kind: LimitWindow; quote_currency: string; max_amount: string | null; min_amount: string | null }[]
+      { window_kind: LimitWindow; quote_currency: string; max_amount: string | null; min_amount: string | null }[],
+      { merge: false }
     >();
 
   if (rulesError) {
@@ -80,10 +82,20 @@ export async function checkEligibility(input: LimitCheckInput): Promise<LimitDec
   const rules: LimitRule[] = (ruleRows ?? []).map((row) => ({
     window: row.window_kind,
     quoteCurrency: row.quote_currency,
-    max: fromDatabase(row.max_amount, "tier_limits.max_amount"),
-    min: fromDatabase(row.min_amount, "tier_limits.min_amount"),
+    max: fromDatabaseNullable(row.max_amount, "tier_limits.max_amount"),
+    min: fromDatabaseNullable(row.min_amount, "tier_limits.min_amount"),
   }));
 
+  // One operation is valued in one currency. Rules in different currencies
+  // would each need their own conversion and their own usage; until a policy
+  // needs that, a mixed configuration is a question this engine cannot answer.
+  const currencies = new Set(rules.map((rule) => rule.quoteCurrency));
+  if (currencies.size > 1) {
+    return {
+      decision: "UNAVAILABLE",
+      reason: "the limit rules for this operation use more than one currency",
+    };
+  }
   const quoteCurrency = rules[0]?.quoteCurrency ?? "USD";
   const amountInQuote = await convertToQuoteCurrency(
     input.amount,
@@ -102,6 +114,7 @@ export async function checkEligibility(input: LimitCheckInput): Promise<LimitDec
         supabase,
         input.userId,
         input.operation,
+        quoteCurrency,
         windowStart(rule.window, new Date()),
       );
 
@@ -132,36 +145,30 @@ export async function checkEligibility(input: LimitCheckInput): Promise<LimitDec
 }
 
 /**
- * Sums what a window has already consumed.
+ * What a window has already consumed, in the limit currency.
  *
- * Reads the rows and adds them in exact BigInt rather than calling a SQL
- * aggregate through PostgREST. An RPC returning `numeric` would be serialised
- * as a JSON number and arrive rounded — the very defect this boundary exists to
- * close — and a function's return type cannot be cast at the call site the way
- * a column can. The row count per user, per operation, per window is small, so
- * the exactness costs nothing worth saving.
+ * Summed by `limit_usage_total()` in exact numeric and returned as text. The
+ * sum cannot be done here by reading the rows: PostgREST caps a response
+ * (1000 rows by default on Supabase), so a busy window would be under-counted
+ * and a ceiling exceeded — and an RPC returning `numeric` would arrive as a
+ * rounded JSON number.
  */
 async function usageInWindow(
   supabase: ReturnType<typeof createAdminClient>,
   userId: string,
   operation: LimitOperation,
+  quoteCurrency: string,
   since: Date,
 ): Promise<Money | null> {
-  const { data, error } = await supabase
-    .from("limit_usage")
-    .select(moneySelect("limit_usage", "usd_equivalent"))
-    .eq("user_id", userId)
-    .eq("operation", operation)
-    .gte("occurred_at", since.toISOString())
-    .overrideTypes<{ usd_equivalent: string }[]>();
+  const { data, error } = await supabase.rpc("limit_usage_total", {
+    p_user_id: userId,
+    p_operation: operation,
+    p_quote_currency: quoteCurrency,
+    p_since: since.toISOString(),
+  });
 
-  if (error) return null;
-
-  let total = ZERO;
-  for (const row of data ?? []) {
-    total = addMoney(total, fromDatabase(row.usd_equivalent, "limit_usage.usd_equivalent"));
-  }
-  return total;
+  if (error || data === null) return null;
+  return fromDatabase(data, "limit_usage_total");
 }
 
 function windowStart(window: Exclude<LimitWindow, "SINGLE">, now: Date): Date {
@@ -180,13 +187,13 @@ function windowStart(window: Exclude<LimitWindow, "SINGLE">, now: Date): Date {
  * answer (spec §13, §80.1).
  */
 async function convertToQuoteCurrency(
-  amount: string,
+  amount: Money,
   assetSymbol: string,
   quoteCurrency: string,
 ): Promise<Money | null> {
   // Identity: exact, and the path that lets USD-denominated limits be enforced
   // on USD operations with no market data connected at all.
-  if (assetSymbol === quoteCurrency) return parseMoney(amount);
+  if (assetSymbol === quoteCurrency) return amount;
 
   const provider = getMarketDataProvider();
   if (!provider.isConfigured()) return null;
@@ -194,8 +201,8 @@ async function convertToQuoteCurrency(
   try {
     const ticker = await provider.getTicker(`${assetSymbol}-${quoteCurrency}`);
     const rate = parseMoney(ticker.price);
-    if (rate <= 0n) return null;
-    return multiplyMoney(parseMoney(amount), rate);
+    if (!isPositive(rate)) return null;
+    return multiplyMoney(amount, rate);
   } catch (error) {
     if (!isAppError(error)) {
       console.error("[limit-engine] rate lookup failed", error);
@@ -234,14 +241,14 @@ async function ceilingsAtHigherTiers(args: {
     .eq("operation", operation)
     .eq("window_kind", window)
     .eq("is_active", true)
-    .overrideTypes<{ tier_code: string; max_amount: string | null }[]>();
+    .overrideTypes<{ tier_code: string; max_amount: string | null }[], { merge: false }>();
 
   return tiers
     .filter((t) => t.rank > currentRank)
     .map((tier) => {
       const rule = (higherRules ?? []).find((r) => r.tier_code === tier.code);
       if (!rule) return null;
-      return { code: tier.code, max: fromDatabase(rule.max_amount, "tier_limits.max_amount") };
+      return { code: tier.code, max: fromDatabaseNullable(rule.max_amount, "tier_limits.max_amount") };
     })
     .filter((v): v is { code: string; max: Money | null } => v !== null);
 }

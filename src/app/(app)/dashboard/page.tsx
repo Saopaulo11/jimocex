@@ -22,7 +22,7 @@ import {
 } from "@/components/ui";
 import { requireUser } from "@/lib/auth/session";
 import { moneySelect } from "@/lib/db/money-columns";
-import { fromDatabase, isZero } from "@/lib/money";
+import { fromDatabase, fromDatabaseNullable, isZero } from "@/lib/money";
 import { createClient } from "@/lib/supabase/server";
 
 export const metadata: Metadata = { title: "Overview" };
@@ -77,12 +77,13 @@ export default async function DashboardPage() {
           window_kind: string;
           quote_currency: string;
           max_amount: string | null;
-        }[]
+        }[],
+        { merge: false }
       >(),
     supabase
       .from("wallets")
       .select(moneySelect("wallets", "id, available_balance, locked_balance"))
-      .overrideTypes<{ id: string; available_balance: string; locked_balance: string }[]>(),
+      .overrideTypes<{ id: string; available_balance: string; locked_balance: string }[], { merge: false }>(),
   ]);
 
   // Both balance columns were cast to text by moneySelect, so fromDatabase
@@ -94,12 +95,22 @@ export default async function DashboardPage() {
     return !isZero(available) || !isZero(locked);
   });
 
-  const sortedLimits = [...(limits ?? [])].sort((a, b) => {
-    const byOperation =
-      OPERATION_ORDER.indexOf(a.operation) - OPERATION_ORDER.indexOf(b.operation);
-    if (byOperation !== 0) return byOperation;
-    return a.window_kind.localeCompare(b.window_kind);
-  });
+  // Parsed where it is read, like the balances: a limit is displayed from
+  // Money, so a dropped cast throws here naming the column instead of
+  // rendering whatever arrived.
+  const sortedLimits = (limits ?? [])
+    .map((limit) => ({
+      operation: limit.operation,
+      window_kind: limit.window_kind,
+      quote_currency: limit.quote_currency,
+      max: fromDatabaseNullable(limit.max_amount, "tier_limits.max_amount"),
+    }))
+    .sort((a, b) => {
+      const byOperation =
+        OPERATION_ORDER.indexOf(a.operation) - OPERATION_ORDER.indexOf(b.operation);
+      if (byOperation !== 0) return byOperation;
+      return a.window_kind.localeCompare(b.window_kind);
+    });
 
   return (
     <div className="jc-container jc-stack-lg">
@@ -253,11 +264,11 @@ export default async function DashboardPage() {
                     </span>
                   </Td>
                   <Td numeric>
-                    {limit.max_amount === null ? (
+                    {limit.max === null ? (
                       <span className="jc-muted">By arrangement</span>
                     ) : (
                       <CurrencyAmount
-                        value={limit.max_amount}
+                        value={limit.max}
                         symbol={limit.quote_currency}
                         decimals={0}
                       />

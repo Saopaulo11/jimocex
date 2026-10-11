@@ -44,9 +44,11 @@ grant usage on schema public to anon, authenticated, service_role;
 -- Supabase grants table privileges to the client roles by default and relies on
 -- RLS to constrain them. Mirrored here, including the default for tables the
 -- migrations create later — otherwise a policy test would pass for the wrong
--- reason (no privilege rather than no policy).
+-- reason (no privilege rather than no policy). ALL, as on the hosted project:
+-- that includes TRUNCATE, REFERENCES and TRIGGER, which a narrower stub would
+-- hide from the catalog check.
 alter default privileges in schema public
-  grant select, insert, update, delete on tables to anon, authenticated, service_role;
+  grant all on tables to anon, authenticated, service_role;
 alter default privileges in schema public
   grant usage, select on sequences to anon, authenticated, service_role;
 alter default privileges in schema public

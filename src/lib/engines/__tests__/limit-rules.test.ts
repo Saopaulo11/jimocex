@@ -76,7 +76,9 @@ describe("§25.12 a missing market conversion cannot silently pass a limit", () 
     });
 
     assert.equal(asNull.decision, "UNAVAILABLE");
-    assert.equal(asZero.decision, "ALLOW");
+    // A real zero is refused too — for being zero (see "a zero or negative
+    // amount never passes a limit"), not for being unpriceable.
+    assert.equal(asZero.decision, "BLOCK");
     assert.notEqual(asNull.decision, asZero.decision);
   });
 });
@@ -339,4 +341,22 @@ describe("§25.9 and §25.10 the engine takes no authority from the caller", () 
     // Still judged against the 2000 ceiling that came from `rules`.
     assert.notEqual(result.decision, "ALLOW");
   });
+});
+
+describe("a zero or negative amount never passes a limit", () => {
+  // A negative amount would REDUCE a window's running total, so every ceiling
+  // would pass — and with the seeded rules the engine used to answer ALLOW.
+  for (const amount of ["0", "-250", "-0.000000000000000001"]) {
+    test(`${amount} is blocked`, () => {
+      const result = evaluateLimits({
+        accountStatus: "ACTIVE",
+        amountInQuote: m(amount),
+        rules: [usdSingle("5000"), usdDaily("5000")],
+        usage: { DAILY: m("4999") },
+      });
+
+      assert.equal(result.decision, "BLOCK");
+      assert.match(result.reason ?? "", /greater than zero/);
+    });
+  }
 });

@@ -2,6 +2,7 @@ import "server-only";
 
 import { getMarketDataProvider } from "@/lib/providers/market-data";
 import { moneySelect } from "@/lib/db/money-columns";
+import { fromDatabase, toDecimalString } from "@/lib/money";
 import { createClient } from "@/lib/supabase/server";
 import type { Market, MarketsResult } from "./types";
 
@@ -51,7 +52,8 @@ export async function listMarkets(): Promise<MarketsResult> {
           min_order_size: string;
           base: { symbol: string } | null;
           quote: { symbol: string } | null;
-        }[]
+        }[],
+        { merge: false }
       >();
 
     if (error || !data) return { markets: [], configured: false, pricesAvailable };
@@ -73,7 +75,12 @@ export async function listMarkets(): Promise<MarketsResult> {
           swapEnabled: row.swap_enabled,
           pricePrecision: row.price_precision,
           amountPrecision: row.amount_precision,
-          minOrderSize: row.min_order_size,
+          // Through the gate and back out as a DecimalString: a dropped cast
+          // throws here, naming the column, instead of handing the client
+          // component a number that merely looks like a string in the types.
+          minOrderSize: toDecimalString(
+            fromDatabase(row.min_order_size, "trading_pairs.min_order_size"),
+          ),
         } satisfies Market,
       ];
     });
@@ -87,13 +94,19 @@ export async function listMarkets(): Promise<MarketsResult> {
 }
 
 
-/** Assets a customer can hold, for the exchange selectors. */
-export async function listAssets(): Promise<{ symbol: string; name: string; type: string }[]> {
+/**
+ * Assets a customer can hold, for the exchange selectors. `decimals` is the
+ * asset's own precision: what an amount input accepts (parseAmountInput's
+ * maxDecimals) and how many places an amount displays.
+ */
+export async function listAssets(): Promise<
+  { symbol: string; name: string; type: string; decimals: number }[]
+> {
   try {
     const supabase = await createClient();
     const { data, error } = await supabase
       .from("assets")
-      .select("symbol, name, type")
+      .select("symbol, name, type, decimals")
       .eq("is_active", true)
       .order("type", { ascending: true })
       .order("symbol", { ascending: true });

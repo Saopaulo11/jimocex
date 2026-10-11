@@ -11,7 +11,11 @@ import type { InputHTMLAttributes, ReactNode } from "react";
  * a phone. `type="text"` rather than `type="number"`, deliberately: a number
  * input silently discards what it considers invalid while the user is still
  * typing, and loses trailing separators — both unacceptable when the value is
- * an amount of money. Parsing and validation happen on the server regardless.
+ * an amount of money.
+ *
+ * `value` and `defaultValue` are strings only: the figure stays exactly what
+ * the customer typed until `parseAmountInput()` reads it on the server, with
+ * the asset's own precision. A number prop would already be a float.
  */
 export function AmountInput({
   id,
@@ -23,7 +27,9 @@ export function AmountInput({
   secondary,
   disabled,
   ...rest
-}: Omit<InputHTMLAttributes<HTMLInputElement>, "type"> & {
+}: Omit<InputHTMLAttributes<HTMLInputElement>, "type" | "value" | "defaultValue"> & {
+  value?: string;
+  defaultValue?: string;
   id: string;
   label: ReactNode;
   /** Asset selector or a static symbol. */

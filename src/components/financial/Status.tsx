@@ -1,5 +1,5 @@
 import { Badge, type BadgeTone } from "@/components/ui/Badge";
-import type { Database } from "@/lib/supabase/database.types";
+import type { Database } from "@/lib/db/database";
 
 /**
  * Status presentation (spec §24, §37).

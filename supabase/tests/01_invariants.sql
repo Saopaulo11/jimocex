@@ -46,6 +46,25 @@ begin
 end;
 $fn$;
 
+-- `rejects`, but only a refusal with the expected SQLSTATE counts. For a guard
+-- that has a distinctive error, this proves THAT guard fired — not some other
+-- constraint that happened to stop the same statement.
+create function pg_temp.rejects_with(p_name text, p_sql text, p_sqlstate text) returns void
+language plpgsql as $fn$
+begin
+  begin
+    execute p_sql;
+    insert into test_results (name, passed, detail)
+    values (p_name, false, 'statement was ACCEPTED but must be rejected');
+  exception when others then
+    insert into test_results (name, passed, detail)
+    values (p_name, sqlstate = p_sqlstate,
+            case when sqlstate = p_sqlstate then sqlerrm
+                 else format('rejected with %s (%s), expected %s', sqlstate, sqlerrm, p_sqlstate) end);
+  end;
+end;
+$fn$;
+
 -- A forbidden write can be refused two different ways, and both are correct:
 -- the GRANT layer raises "permission denied", or RLS silently matches no row.
 -- Asserting one specific mechanism would make the suite fragile against a
@@ -565,6 +584,158 @@ begin
 end;
 $$;
 
+reset role;
+
+-- =============================================================================
+-- The money boundary (016, 017)
+--
+-- PostgreSQL numeric(38,18) -> PostgREST -> string -> Money -> ... -> decimal
+-- string -> numeric(38,18). These assert the database end of that chain: values
+-- survive exactly at the edges of the type, a decimal string sent the way
+-- PostgREST sends it lands exactly, NaN cannot enter, ledger_post refuses what
+-- it used to coerce, and every money-returning function hands back text.
+-- =============================================================================
+
+insert into auth.users (id, email) values
+  ('00000000-0000-4000-8000-0000000000c3', 'carol@test.invalid');
+
+do $$
+declare
+  c    uuid := '00000000-0000-4000-8000-0000000000c3';
+  usdt uuid; btc uuid; q uuid;
+  r    record;
+begin
+  select id into usdt from public.assets where symbol = 'USDT';
+  select id into btc  from public.assets where symbol = 'BTC';
+
+  -- The edges of the type.
+  perform pg_temp.holds('money: the smallest unit is stored exactly',
+    '0.000000000000000001'::numeric(38, 18)::text = '0.000000000000000001');
+  perform pg_temp.holds('money: the largest numeric(38,18) is stored exactly',
+    '99999999999999999999.999999999999999999'::numeric(38, 18)::text
+      = '99999999999999999999.999999999999999999');
+  perform pg_temp.rejects('money: a value beyond numeric(38,18) is refused, never truncated',
+    $q$ select '100000000000000000000'::numeric(38, 18) $q$);
+  perform pg_temp.holds('money: numeric::text never uses exponent notation',
+    '1e-18'::numeric(38, 18)::text = '0.000000000000000001'
+    and '1e19'::numeric(38, 18)::text = '10000000000000000000.000000000000000000');
+
+  -- The write path PostgREST uses: a JSON body bound to a record. A decimal
+  -- string lands exactly, which is why the application sends strings.
+  perform pg_temp.holds('money: a decimal string in a JSON body becomes the exact numeric',
+    (select d.amount::text = '1234567890123456.123456789012345678'
+       from json_populate_record(null::public.deposits,
+              '{"amount": "1234567890123456.123456789012345678"}') d));
+  perform pg_temp.holds('money: a decimal string bound to an RPC argument is exact',
+    (select t.p_amount::text = '0.000000000000000001'
+       from json_to_record('{"p_amount": "0.000000000000000001"}') as t(p_amount numeric)));
+
+  -- NaN orders above every number, so `amount > 0` alone lets it in.
+  perform pg_temp.holds('money: NaN would pass a positivity CHECK on its own',
+    'NaN'::numeric > 0);
+  perform pg_temp.rejects('money: a money column refuses NaN', format(
+    $q$ insert into public.deposits (user_id, asset_id, amount) values (%L, %L, 'NaN') $q$, c, usdt));
+  perform pg_temp.takes_effect('money: the same row with a real amount is accepted',
+    format($q$ insert into public.deposits (user_id, asset_id, amount, provider_reference)
+               values (%L, %L, '0.000000000000000001', 'tst:nan-control') $q$, c, usdt),
+    $q$ select exists (select 1 from public.deposits where provider_reference = 'tst:nan-control') $q$);
+  perform pg_temp.rejects('money: a limit cannot be configured as NaN',
+    $q$ update public.tier_limits set max_amount = 'NaN' where tier_code = 'TIER_0' $q$);
+
+  -- ledger_post refuses instead of coercing. Each refusal is asserted by its
+  -- SQLSTATE, so the test proves ledger_post's own guard fired rather than a
+  -- table constraint further down: 22023 for a figure that is not a finite
+  -- 18-place decimal, 23502 for a missing one.
+  perform pg_temp.rejects_with('ledger_post refuses NaN', format(
+    $q$ select public.ledger_post(%L, %L, 'DEPOSIT', 'NaN', 'NaN', 0, 'test', null, 'tst:nan') $q$, c, usdt),
+    '22023');
+  perform pg_temp.rejects_with('ledger_post refuses Infinity', format(
+    $q$ select public.ledger_post(%L, %L, 'DEPOSIT', 'Infinity', 'Infinity', 0, 'test', null, 'tst:inf') $q$, c, usdt),
+    '22023');
+  -- A RELEASE with a missing locked delta: the old function read it as zero,
+  -- credited 5 available out of nothing, and reconciliation saw no drift.
+  perform pg_temp.rejects_with('ledger_post refuses a missing delta instead of reading it as zero', format(
+    $q$ select public.ledger_post(%L, %L, 'RELEASE', 5, 5, null, 'test', null, 'tst:null') $q$, c, usdt),
+    '23502');
+  perform pg_temp.rejects_with('ledger_post refuses a 19th decimal instead of rounding it', format(
+    $q$ select public.ledger_post(%L, %L, 'DEPOSIT', '1.0000000000000000001', '1.0000000000000000001', 0,
+                                  'test', null, 'tst:19dp') $q$, c, usdt),
+    '22023');
+
+  -- The smallest unit, through the sanctioned path, end to end.
+  perform public.ledger_post(c, btc, 'DEPOSIT', '0.000000000000000001', '0.000000000000000001', '0',
+                             'test', null, 'tst:dust');
+  perform pg_temp.holds('ledger_post credits the smallest unit exactly',
+    (select available_balance::text = '0.000000000000000001'
+       from public.wallets where user_id = c and asset_id = btc));
+  perform pg_temp.holds('reconcile_wallets reports nothing while ledger and wallet agree',
+    not exists (select 1 from public.reconcile_wallets() x where x.user_id = c));
+
+  -- A ledger whose wallet row is gone must not vanish from the report. Only
+  -- the table owner can still delete a wallet after 017; the check is that
+  -- reconciliation would notice if it happened.
+  delete from public.wallets where user_id = c and asset_id = btc;
+  perform pg_temp.holds('reconcile_wallets reports a ledger whose wallet row is missing',
+    exists (select 1 from public.reconcile_wallets() x
+             where x.user_id = c and x.asset_id = btc
+               and x.wallet_available is null
+               and x.ledger_available = '0.000000000000000001'));
+
+  -- consume_quote hands back the stored money as exact text.
+  insert into public.swap_quotes (user_id, from_asset_id, to_asset_id, from_amount,
+                                  rate, fee, output_amount, rate_source, expires_at)
+  values (c, usdt, btc, '1234567890123456.123456789012345678', '0.000000016180339887',
+          '0.000000000000000001', '19975668.796219138600000000', 'test', now() + interval '5 min')
+  returning id into q;
+  select * into r from public.consume_quote(q, c, null);
+  perform pg_temp.holds('consume_quote returns the quote''s money as exact text',
+    r.from_amount = '1234567890123456.123456789012345678'
+    and r.rate = '0.000000016180339887'
+    and r.fee = '0.000000000000000001'
+    and r.output_amount = '19975668.796219138600000000'
+    and pg_typeof(r.output_amount) = 'text'::regtype);
+
+  -- Window usage: more rows than one PostgREST page, summed exactly, per currency.
+  insert into public.limit_usage (user_id, operation, usd_equivalent, quote_currency,
+                                  reference_type, reference_id)
+  select c, 'SWAP', '0.000000000000000001', 'USD', 'test', gen_random_uuid()
+  from generate_series(1, 1500);
+  insert into public.limit_usage (user_id, operation, usd_equivalent, quote_currency,
+                                  reference_type, reference_id)
+  values (c, 'SWAP', '4999.999999999999998500', 'USD', 'test', gen_random_uuid()),
+         (c, 'SWAP', '7', 'EUR', 'test', gen_random_uuid());
+  perform pg_temp.holds('limit_usage_total sums past one API page exactly',
+    public.limit_usage_total(c, 'SWAP', 'USD', now() - interval '1 day') = '5000.000000000000000000');
+  perform pg_temp.holds('limit_usage_total counts only the requested currency',
+    public.limit_usage_total(c, 'SWAP', 'EUR', now() - interval '1 day') = '7.000000000000000000');
+  perform pg_temp.holds('limit_usage_total returns text',
+    pg_typeof(public.limit_usage_total(c, 'SWAP', 'USD', now())) = 'text'::regtype);
+  perform pg_temp.rejects('the ledger cannot be truncated even by its owner',
+    $q$ truncate public.ledger_entries $q$);
+  perform pg_temp.holds('limit_usage_total returns NULL, not zero, for a missing argument',
+    public.limit_usage_total(c, 'SWAP', null, now() - interval '1 day') is null);
+end;
+$$;
+
+-- service_role bypasses RLS, so only the GRANT layer stands between the admin
+-- client and a balance. After 017 it does not stand alone: the only way in is
+-- ledger_post.
+set local role service_role;
+select pg_temp.rejects('service_role cannot write a wallet balance directly',
+  $q$ update public.wallets set available_balance = available_balance + 1 $q$);
+select pg_temp.rejects('service_role cannot insert a ledger entry that moves no wallet',
+  $q$ insert into public.ledger_entries (user_id, asset_id, entry_type, amount, available_delta, locked_delta)
+      select user_id, asset_id, 'ADJUSTMENT', 1, 1, 0 from public.wallets limit 1 $q$);
+select pg_temp.rejects('service_role cannot delete a wallet',
+  $q$ delete from public.wallets $q$);
+select pg_temp.rejects('service_role cannot truncate the ledger',
+  $q$ truncate public.ledger_entries $q$);
+select pg_temp.rejects('service_role cannot truncate window usage',
+  $q$ truncate public.limit_usage $q$);
+select pg_temp.holds('service_role still moves money through ledger_post',
+  (select public.ledger_post('00000000-0000-4000-8000-0000000000c3',
+                             (select id from public.assets where symbol = 'USDT'),
+                             'DEPOSIT', '1.5', '1.5', '0', 'test', null, 'tst:service-role') is not null));
 reset role;
 
 -- -----------------------------------------------------------------------------

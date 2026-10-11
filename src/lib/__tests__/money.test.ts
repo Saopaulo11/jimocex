@@ -112,6 +112,8 @@ describe("parseMoney", () => {
     assert.equal(formatMoney(parseMoney(tooPrecise, "up")), "0.123456789012345679");
     assert.equal(formatMoney(parseMoney("0.0000000000000000005", "half-up")), "0.000000000000000001");
     assert.equal(formatMoney(parseMoney("0.0000000000000000004", "half-up")), "0");
+    assert.equal(formatMoney(parseMoney("0.0000000000000000009", "half-up")), "0.000000000000000001");
+    assert.equal(formatMoney(parseMoney("0.00000000000000000049", "half-up")), "0");
   });
 });
 

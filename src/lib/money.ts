@@ -100,7 +100,7 @@ export function parseMoney(value: string, rounding: Rounding = "truncate"): Mone
   // More precision than the scale can hold. Explicit rather than silent.
   if (dropped && /[1-9]/.test(dropped)) {
     if (rounding === "up") scaled += 1n;
-    else if (rounding === "half-up" && Number(dropped[0]) >= 5) scaled += 1n;
+    else if (rounding === "half-up" && dropped.charAt(0) >= "5") scaled += 1n;
   }
 
   return (negative ? -scaled : scaled) as Money;

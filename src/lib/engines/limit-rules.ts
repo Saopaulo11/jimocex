@@ -6,6 +6,7 @@ import {
   greaterThan,
   isPositive,
   lessThan,
+  multiplyMoney,
   type Money,
 } from "../money.ts";
 import type { Database } from "@/lib/db/database";
@@ -90,6 +91,20 @@ export type EvaluateInput = {
    */
   higherTiers?: { code: string; max: Money | null }[];
 };
+
+/**
+ * An amount's value in the limit currency, at `rate` (limit currency per unit).
+ *
+ * Rounded UP to the 18th place. This is the figure the operation is charged
+ * against the ceiling and, once authorised, consumes from the window, so the
+ * rounding must never make it look smaller than it is: truncating would let
+ * every operation consume up to 10^-18 less than it moved. Whatever rounds this
+ * figure, it is fixed once and stored (limit_usage.usd_equivalent), never
+ * recomputed.
+ */
+export function valueInLimitCurrency(amount: Money, rate: Money): Money {
+  return multiplyMoney(amount, rate, "up");
+}
 
 export function evaluateLimits(input: EvaluateInput): LimitDecision {
   if (input.accountStatus === "CLOSED") {

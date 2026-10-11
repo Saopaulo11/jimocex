@@ -46,6 +46,16 @@
 --    revoked on every money table, and refused outright on the two append-only
 --    ones.
 --
+-- 7. Least privilege on functions. Every callable function was already limited
+--    to service_role, but the seven trigger functions kept EXECUTE for PUBLIC,
+--    anon, authenticated and service_role, and the schema's default privileges
+--    granted EXECUTE on every NEW function to all three client roles — so a
+--    migration that forgot its REVOKE would publish a function at
+--    /rest/v1/rpc. Trigger functions now grant EXECUTE to nobody (a trigger
+--    does not need it to fire), new functions start with no client grant, and
+--    src/lib/db/money-columns.ts states exactly who may execute each function;
+--    scripts/test-db.sh fails on any difference.
+--
 -- DEPLOYMENT ORDER. Apply 016 and this migration to the hosted project BEFORE
 -- deploying an application build that contains the matching LimitEngine: the
 -- engine reads window usage through limit_usage_total() and, if the function
@@ -440,3 +450,30 @@ create trigger ledger_entries_no_truncate
 create trigger limit_usage_no_truncate
   before truncate on public.limit_usage
   for each statement execute function public.forbid_mutation();
+
+-- -----------------------------------------------------------------------------
+-- 7. Least privilege on functions.
+--
+-- A trigger function runs because a trigger fires, not because a role calls
+-- it; PostgreSQL checks EXECUTE only when the trigger is created. No role
+-- needs to be able to call one, and PUBLIC — every role, present and future —
+-- certainly does not.
+-- -----------------------------------------------------------------------------
+
+revoke all on function
+  public.forbid_mutation(),
+  public.guard_notification_columns(),
+  public.guard_order_status_transition(),
+  public.guard_profile_privileged_columns(),
+  public.guard_swap_status_transition(),
+  public.guard_withdrawal_status_transition(),
+  public.touch_updated_at(),
+  public.handle_new_user()
+  from public, anon, authenticated, service_role;
+
+-- A function created in public from now on starts with no grant for any client
+-- role; each migration grants exactly what the function needs. (Per schema:
+-- the default for other schemas, and the PUBLIC default that each function's
+-- own REVOKE removes, are left as they are.)
+alter default privileges for role postgres in schema public
+  revoke execute on functions from anon, authenticated, service_role;

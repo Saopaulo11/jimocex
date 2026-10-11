@@ -127,6 +127,18 @@ select json_build_object(
     where n.nspname = 'public' and c.relkind in ('r', 'p')
       and has_table_privilege(r.name, c.oid, priv.name)
   ),
+  -- Default EXECUTE that a new function in public would receive, per client role.
+  'defaultFunctionGrants', (
+    select coalesce(json_agg(distinct r.name order by r.name), '[]'::json)
+    from pg_default_acl d
+    cross join (values ('anon'), ('authenticated'), ('service_role')) as r(name)
+    where d.defaclnamespace = 'public'::regnamespace
+      and d.defaclobjtype = 'f'
+      and pg_get_userbyid(d.defaclrole) = 'postgres'
+      and exists (
+        select 1 from aclexplode(d.defaclacl) a
+        where a.grantee = (select oid from pg_roles where rolname = r.name) and a.privilege_type = 'EXECUTE')
+  ),
   'truncateTriggers', (
     select coalesce(json_agg(c.relname order by c.relname), '[]'::json)
     from pg_trigger t

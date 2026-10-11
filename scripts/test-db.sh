@@ -101,3 +101,11 @@ echo "==> money registry vs. database catalog"
 cp "$ROOT/supabase/tests/02_money_catalog.sql" "$WORK/catalog.sql"; chmod 644 "$WORK/catalog.sql"
 AS_PG "$BIN/psql -h $SOCK -d $DB -v ON_ERROR_STOP=1 -qAt -f $WORK/catalog.sql -o $WORK/catalog.json"
 node --experimental-strip-types --no-warnings "$ROOT/scripts/check-money-catalog.ts" "$WORK/catalog.json"
+
+# Precision, end to end: Money -> moneyArgs/moneyInsert -> JSON.stringify ->
+# PostgREST-style binding -> numeric(38,18) -> ::text -> fromDatabase -> Money.
+echo "==> money round trip through a JSON body"
+node --experimental-strip-types --no-warnings "$ROOT/scripts/check-money-roundtrip.ts" generate > "$WORK/roundtrip.sql"
+chmod 644 "$WORK/roundtrip.sql"
+AS_PG "$BIN/psql -h $SOCK -d $DB -v ON_ERROR_STOP=1 -qAt -f $WORK/roundtrip.sql -o $WORK/roundtrip.out"
+node --experimental-strip-types --no-warnings "$ROOT/scripts/check-money-roundtrip.ts" verify "$WORK/roundtrip.out"

@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-import { evaluateLimits, type EvaluateInput, type LimitRule } from "../limit-rules.ts";
-import { parseMoney, type Money } from "../../money.ts";
+import { evaluateLimits, valueInLimitCurrency, type EvaluateInput, type LimitRule } from "../limit-rules.ts";
+import { formatMoney, parseMoney, type Money } from "../../money.ts";
 
 /**
  * LimitEngine decision tests (spec §25).
@@ -359,4 +359,23 @@ describe("a zero or negative amount never passes a limit", () => {
       assert.match(result.reason ?? "", /greater than zero/);
     });
   }
+});
+
+describe("conversion into the limit currency never understates the amount", () => {
+  test("a product with digits beyond the 18th place is rounded up, not down", () => {
+    // 0.000000000000000003 × 0.5 = 0.0000000000000000015 → 0.000000000000000002
+    assert.equal(formatMoney(valueInLimitCurrency(m("0.000000000000000003"), m("0.5"))), "0.000000000000000002");
+    // 1 BTC at a rate with 18 decimals stays exact.
+    assert.equal(formatMoney(valueInLimitCurrency(m("1"), m("64123.123456789012345678"))), "64123.123456789012345678");
+  });
+
+  test("at the ceiling, the rounding direction decides — and it decides against the overrun", () => {
+    // 0.5 × 10000.000000000000000001 = 5000.0000000000000000005 exactly.
+    // Truncated that is 5000 and a 5000 ceiling would ALLOW it; the real value
+    // is above the ceiling, so it must not be.
+    const value = valueInLimitCurrency(m("0.5"), m("10000.000000000000000001"));
+    assert.equal(formatMoney(value), "5000.000000000000000001");
+    const result = evaluateLimits({ accountStatus: "ACTIVE", amountInQuote: value, rules: [usdSingle("5000")], usage: {} });
+    assert.notEqual(result.decision, "ALLOW");
+  });
 });

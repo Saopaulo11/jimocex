@@ -159,6 +159,11 @@ type FunctionMoney = {
   /** jsonb arguments; like jsonb columns, they may hold no JSON numbers. */
   readonly jsonArgs?: readonly string[];
   /**
+   * The client roles that may EXECUTE the function — exactly these, checked
+   * against the catalog. Every function here is called by the server only.
+   */
+  readonly executors: readonly ("anon" | "authenticated" | "service_role")[];
+  /**
    * Result columns that can be NULL. Supabase's generator types every column
    * of a RETURNS TABLE as non-null; these are re-typed `| null` in
    * `@/lib/db/database`, so a consumer reads them with fromDatabaseNullable()
@@ -167,7 +172,8 @@ type FunctionMoney = {
   readonly nullableResult?: readonly string[];
 };
 
-const NO_MONEY: FunctionMoney = { args: [], result: [] };
+/** Called only by the server, carrying no money in or out. */
+const SERVER_ONLY: FunctionMoney = { args: [], result: [], executors: ["service_role"] };
 
 /**
  * Every non-trigger function in `public`, and where money crosses it.
@@ -183,28 +189,47 @@ export const DB_FUNCTIONS = {
     args: ["p_amount", "p_available_delta", "p_locked_delta"],
     result: [],
     jsonArgs: ["p_metadata"],
+    executors: ["service_role"],
   },
   consume_quote: {
     args: [],
     result: ["from_amount", "rate", "fee", "output_amount"],
+    executors: ["service_role"],
     // A quote is owned by a user OR a session, and may have no fee asset.
     nullableResult: ["user_id", "session_id", "fee_asset_id", "used_at"],
   },
   reconcile_wallets: {
     args: [],
     result: ["wallet_available", "ledger_available", "wallet_locked", "ledger_locked"],
+    executors: ["service_role"],
     // NULL when a ledger has no wallet row — the incident the FULL JOIN exists to report.
     nullableResult: ["wallet_available", "wallet_locked"],
   },
-  limit_usage_total: { args: [], result: [], scalarResult: true },
-  claim_deposit_for_credit: NO_MONEY,
-  claim_provider_event: NO_MONEY,
-  expire_stale_quotes: NO_MONEY,
-  has_admin_role: NO_MONEY,
-  is_admin: NO_MONEY,
-  mark_trade_settled: NO_MONEY,
-  release_withdrawal_hold: NO_MONEY,
+  limit_usage_total: { args: [], result: [], scalarResult: true, executors: ["service_role"] },
+  claim_deposit_for_credit: SERVER_ONLY,
+  claim_provider_event: SERVER_ONLY,
+  expire_stale_quotes: SERVER_ONLY,
+  // Used by server code, not by any RLS policy — so no client role needs it.
+  has_admin_role: SERVER_ONLY,
+  is_admin: SERVER_ONLY,
+  mark_trade_settled: SERVER_ONLY,
+  release_withdrawal_hold: SERVER_ONLY,
 } as const satisfies Record<string, FunctionMoney>;
+
+/**
+ * Trigger functions. They fire because a trigger does; no role calls them, so
+ * no role — not even service_role — is granted EXECUTE.
+ */
+export const TRIGGER_FUNCTIONS = [
+  "forbid_mutation",
+  "guard_notification_columns",
+  "guard_order_status_transition",
+  "guard_profile_privileged_columns",
+  "guard_swap_status_transition",
+  "guard_withdrawal_status_transition",
+  "handle_new_user",
+  "touch_updated_at",
+] as const;
 
 export type DbFunction = keyof typeof DB_FUNCTIONS;
 

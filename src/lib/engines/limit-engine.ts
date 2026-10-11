@@ -6,7 +6,6 @@ import {
   fromDatabase,
   fromDatabaseNullable,
   isPositive,
-  multiplyMoney,
   parseMoney,
   type Money,
 } from "@/lib/money";
@@ -15,6 +14,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 
 import {
   evaluateLimits,
+  valueInLimitCurrency,
   type LimitDecision,
   type LimitOperation,
   type LimitRule,
@@ -202,7 +202,7 @@ async function convertToQuoteCurrency(
     const ticker = await provider.getTicker(`${assetSymbol}-${quoteCurrency}`);
     const rate = parseMoney(ticker.price);
     if (!isPositive(rate)) return null;
-    return multiplyMoney(amount, rate);
+    return valueInLimitCurrency(amount, rate);
   } catch (error) {
     if (!isAppError(error)) {
       console.error("[limit-engine] rate lookup failed", error);

@@ -26,6 +26,7 @@ import {
   MONEY_COLUMNS,
   NARROW_MONEY_COLUMNS,
   NOT_MONEY_NUMERIC,
+  TRIGGER_FUNCTIONS,
 } from "../src/lib/db/money-columns.ts";
 
 type Column = {
@@ -57,6 +58,7 @@ type Catalog = {
   functions: Fn[] | null;
   tablePrivileges: { table: string; role: string; privilege: string }[] | null;
   truncateTriggers: string[];
+  defaultFunctionGrants: string[];
 };
 
 const file = process.argv[2];
@@ -70,7 +72,18 @@ const problems: string[] = [];
 const money = MONEY_COLUMNS as Record<string, readonly string[]>;
 const json = JSON_COLUMNS as Record<string, readonly string[]>;
 const generated = GENERATED_MONEY_COLUMNS as Record<string, readonly string[]>;
-const functions = DB_FUNCTIONS as Record<string, { args: readonly string[]; result: readonly string[]; scalarResult?: true; jsonArgs?: readonly string[] }>;
+const functions = DB_FUNCTIONS as Record<
+  string,
+  {
+    args: readonly string[];
+    result: readonly string[];
+    scalarResult?: true;
+    jsonArgs?: readonly string[];
+    executors: readonly string[];
+  }
+>;
+const CLIENT_ROLES = ["anon", "authenticated", "service_role"] as const;
+const executorsOf = (fn: Fn) => CLIENT_ROLES.filter((role) => fn.executableBy[role]);
 
 /** Money tables whose rows are never changed or removed (forbid_mutation). */
 const APPEND_ONLY_MONEY_TABLES = ["ledger_entries", "limit_usage"];
@@ -172,8 +185,19 @@ for (const view of catalog.views) {
 /* --------------------------------------------------------------- functions */
 
 const seen = new Set<string>();
+const seenTriggers = new Set<string>();
 for (const fn of catalog.functions ?? []) {
-  if (fn.isTrigger) continue;
+  if (fn.isTrigger) {
+    seenTriggers.add(fn.name);
+    if (!(TRIGGER_FUNCTIONS as readonly string[]).includes(fn.name)) {
+      problems.push(`trigger function ${fn.name} is not listed in TRIGGER_FUNCTIONS`);
+    }
+    const granted = executorsOf(fn);
+    if (granted.length > 0) {
+      problems.push(`trigger function ${fn.name} is executable by ${granted.join(", ")}; no role needs to call it`);
+    }
+    continue;
+  }
   seen.add(fn.name);
   const entry = functions[fn.name];
   const label = `${fn.name}(${fn.identity})`;
@@ -229,6 +253,13 @@ for (const fn of catalog.functions ?? []) {
     problems.push(`${label}: DB_FUNCTIONS says its result is money as text, but it returns ${fn.scalarResult}`);
   }
 
+  // Exactly the roles the registry names — no more (least privilege), no fewer
+  // (a forgotten GRANT would break the server path that needs it).
+  const granted = executorsOf(fn);
+  const expected = [...entry.executors].sort();
+  if ([...granted].sort().join() !== expected.join()) {
+    problems.push(`${label} is executable by [${granted}], DB_FUNCTIONS says [${expected}]`);
+  }
   const movesMoney = entry.args.length > 0 || entry.result.length > 0 || entry.scalarResult === true;
   if (movesMoney && (fn.executableBy.anon || fn.executableBy.authenticated)) {
     problems.push(`${label} carries money and is executable by ${fn.executableBy.anon ? "anon" : "authenticated"}`);
@@ -241,6 +272,12 @@ for (const fn of catalog.functions ?? []) {
 }
 for (const name of Object.keys(functions)) {
   if (!seen.has(name)) problems.push(`DB_FUNCTIONS lists ${name}, which does not exist`);
+}
+for (const name of TRIGGER_FUNCTIONS) {
+  if (!seenTriggers.has(name)) problems.push(`TRIGGER_FUNCTIONS lists ${name}, which does not exist`);
+}
+for (const role of catalog.defaultFunctionGrants) {
+  problems.push(`a new function in public would be executable by ${role} by default; revoke the default privilege`);
 }
 
 /* ---------------------------------------------------- balances via ledger */

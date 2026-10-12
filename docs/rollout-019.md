@@ -348,5 +348,5 @@ Every place the application reaches the database, in the working tree. `src/` is
 - A deployment of `1131d9e` would lose `limit_usage_in_window` when 016 runs, also on an unreachable path. No such deployment exists in the Vercel account checked in Phase 1.8.
 
 **Before any public deployment** (not part of 019):
-- **Next.js.** The application pins `next` 16.3.5. `npm audit` (Phase 1.9) reports advisories fixed in later 16.3.x releases, among them GHSA-vcvr-r3jv-pc5j (critical, code execution through `next/og`'s `ImageResponse`, fixed in 16.3.6), and offers 16.4.0. The application does not import `next/og`. Upgrading is a separate, reviewed change.
-- **The database behind a Preview.** There is one hosted project. A Preview pointed at it writes real rows (sign-ups) into it.
+- **Next.js.** 16.3.5 was affected by seven advisories, among them GHSA-vcvr-r3jv-pc5j (critical, code execution through `next/og`'s `ImageResponse`, fixed in 16.3.6) and GHSA-cjq9-62q9-8jv4 (high, SSRF in Image Optimization, fixed in 16.3.8). Phase 2.2 pins `next` and `eslint-config-next` to 16.3.8, the last 16.3.x patch: `npm audit --omit=dev` reports nothing, and the five dev-only findings left (GHSA-vfj7-8cjw-p6xm in `braces`, through the lint plugin) have no patched version.
+- **The database behind a Preview.** There is one hosted project. A Preview pointed at it writes real rows (sign-ups) into it. The isolated test database and the Preview configuration are planned in `docs/preview-environment.md`.

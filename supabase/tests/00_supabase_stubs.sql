@@ -46,11 +46,12 @@ grant usage on schema public to anon, authenticated, service_role;
 -- migrations create later — otherwise a policy test would pass for the wrong
 -- reason (no privilege rather than no policy). ALL, as on the hosted project:
 -- that includes TRUNCATE, REFERENCES and TRIGGER, which a narrower stub would
--- hide from the catalog check.
+-- hide from the catalog check. Sequences get USAGE, SELECT and UPDATE, also as
+-- on the hosted project.
 alter default privileges in schema public
   grant all on tables to anon, authenticated, service_role;
 alter default privileges in schema public
-  grant usage, select on sequences to anon, authenticated, service_role;
+  grant usage, select, update on sequences to anon, authenticated, service_role;
 alter default privileges in schema public
   grant execute on functions to anon, authenticated, service_role;
 

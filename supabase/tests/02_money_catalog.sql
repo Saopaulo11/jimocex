@@ -2,9 +2,10 @@
 -- JimoCex — catalog snapshot for the money registry check
 --
 -- Not an assertion suite. Emits one JSON document describing every column,
--- CHECK constraint, function and balance-table privilege in `public`, as the
--- migrations actually built them. scripts/check-money-catalog.ts compares it
--- with src/lib/db/money-columns.ts, so the registry is checked against the
+-- CHECK constraint, function and privilege in `public`, as the migrations
+-- actually built them. scripts/check-money-catalog.ts compares it with
+-- src/lib/db/money-columns.ts, and scripts/check-privileges.ts with
+-- scripts/privilege-registry.ts, so both registries are checked against the
 -- database itself rather than against a reading of the migration text.
 -- =============================================================================
 
@@ -24,6 +25,18 @@ with recursive numericish(oid) as (
           select 1 from pg_attribute a
           where a.attrelid = t.typrelid and a.attnum > 0 and not a.attisdropped
             and a.atttypid = n.oid))
+),
+-- The table privileges this server knows. MAINTAIN exists from PostgreSQL 17
+-- on, and naming it on 16 is an error, so the list comes from the version
+-- instead of being written into a has_table_privilege() call.
+table_privilege_kinds(kind, ord) as (
+  select k, o
+  from unnest(array['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER']
+              || case when current_setting('server_version_num')::integer >= 170000
+                      then array['MAINTAIN'] else array[]::text[] end) with ordinality as u(k, o)
+),
+privilege_roles(name) as (
+  values ('anon'), ('authenticated'), ('service_role'), ('public')
 )
 select json_build_object(
   'columns', (
@@ -104,9 +117,19 @@ select json_build_object(
              'scalarResult', format_type(p.prorettype, null),
              'scalarNumericish', p.prorettype in (select oid from numericish),
              'executableBy', json_build_object(
+               'PUBLIC',        has_function_privilege('public', p.oid, 'execute'),
                'anon',          has_function_privilege('anon', p.oid, 'execute'),
                'authenticated', has_function_privilege('authenticated', p.oid, 'execute'),
                'service_role',  has_function_privilege('service_role', p.oid, 'execute')),
+             'securityDefiner', p.prosecdef,
+             'config', coalesce(to_json(p.proconfig), '[]'::json),
+             'owner', pg_get_userbyid(p.proowner),
+             -- Explicit EXECUTE grants to anyone but the owner and the roles above.
+             'otherGrantees', (
+               select coalesce(json_agg(distinct pg_get_userbyid(a.grantee)), '[]'::json)
+               from aclexplode(p.proacl) a
+               where a.grantee <> 0 and a.grantee <> p.proowner
+                 and pg_get_userbyid(a.grantee) not in ('anon', 'authenticated', 'service_role')),
              'source', p.prosrc)
            order by p.proname)
     from pg_proc p
@@ -127,17 +150,26 @@ select json_build_object(
     where n.nspname = 'public' and c.relkind in ('r', 'p')
       and has_table_privilege(r.name, c.oid, priv.name)
   ),
-  -- Default EXECUTE that a new function in public would receive, per client role.
+  -- Who could execute a function postgres creates in public next, by default:
+  -- the global default — PostgreSQL's built-in one, EXECUTE for PUBLIC, when
+  -- there is no global row — plus the per-schema one. Reading only the
+  -- per-schema row misses PUBLIC, which every role inherits.
   'defaultFunctionGrants', (
-    select coalesce(json_agg(distinct r.name order by r.name), '[]'::json)
-    from pg_default_acl d
-    cross join (values ('anon'), ('authenticated'), ('service_role')) as r(name)
-    where d.defaclnamespace = 'public'::regnamespace
-      and d.defaclobjtype = 'f'
-      and pg_get_userbyid(d.defaclrole) = 'postgres'
-      and exists (
-        select 1 from aclexplode(d.defaclacl) a
-        where a.grantee = (select oid from pg_roles where rolname = r.name) and a.privilege_type = 'EXECUTE')
+    select coalesce(json_agg(distinct g.name order by g.name), '[]'::json)
+    from (
+      select case when a.grantee = 0 then 'PUBLIC' else pg_get_userbyid(a.grantee) end as name
+      from aclexplode(coalesce(
+             (select d.defaclacl from pg_default_acl d
+               where d.defaclrole = 'postgres'::regrole and d.defaclnamespace = 0 and d.defaclobjtype = 'f'),
+             acldefault('f', 'postgres'::regrole))) a
+      where a.privilege_type = 'EXECUTE'
+      union all
+      select case when a.grantee = 0 then 'PUBLIC' else pg_get_userbyid(a.grantee) end
+      from pg_default_acl d, aclexplode(d.defaclacl) a
+      where d.defaclrole = 'postgres'::regrole and d.defaclnamespace = 'public'::regnamespace
+        and d.defaclobjtype = 'f' and a.privilege_type = 'EXECUTE'
+    ) g
+    where g.name in ('PUBLIC', 'anon', 'authenticated', 'service_role')
   ),
   'truncateTriggers', (
     select coalesce(json_agg(c.relname order by c.relname), '[]'::json)
@@ -146,5 +178,106 @@ select json_build_object(
     join pg_namespace n on n.oid = c.relnamespace
     where n.nspname = 'public' and not t.tgisinternal
       and (t.tgtype::int & 32) <> 0   -- TRIGGER_TYPE_TRUNCATE
+  ),
+  -- The exact privilege state of public, for scripts/check-privileges.ts.
+  'privileges', json_build_object(
+    'serverVersionNum', current_setting('server_version_num')::integer,
+    'tableKinds', (select json_agg(k.kind order by k.ord) from table_privilege_kinds k),
+    'relations', (
+      select coalesce(json_agg(json_build_object(
+               'name', c.relname, 'kind', c.relkind::text, 'rls', c.relrowsecurity,
+               'force', c.relforcerowsecurity, 'owner', pg_get_userbyid(c.relowner))
+             order by c.relname), '[]'::json)
+      from pg_class c
+      where c.relnamespace = 'public'::regnamespace and c.relkind in ('r', 'p', 'v', 'm', 'f', 'S')
+    ),
+    -- Effective privileges (has_table_privilege: direct, through PUBLIC, through
+    -- role membership), every kind, every client role and PUBLIC.
+    'tableAcl', (
+      select coalesce(json_agg(json_build_object(
+               'table', c.relname,
+               'role', r.name,
+               'privileges', (select coalesce(json_agg(k.kind order by k.ord), '[]'::json)
+                              from table_privilege_kinds k
+                              where has_table_privilege(r.name, c.oid, k.kind)))
+             order by c.relname, r.name), '[]'::json)
+      from pg_class c
+      cross join privilege_roles r
+      where c.relnamespace = 'public'::regnamespace and c.relkind in ('r', 'p', 'v', 'm', 'f')
+    ),
+    -- Explicit table grants to anyone but the owner, PUBLIC and the client roles.
+    'otherTableGrantees', (
+      select coalesce(json_agg(format('%s: %s %s', c.relname, pg_get_userbyid(a.grantee), a.privilege_type)
+                               order by c.relname, a.privilege_type), '[]'::json)
+      from pg_class c, aclexplode(c.relacl) a
+      where c.relnamespace = 'public'::regnamespace and c.relkind in ('r', 'p', 'v', 'm', 'f', 'S')
+        and a.grantee <> 0 and a.grantee <> c.relowner
+        and pg_get_userbyid(a.grantee) not in ('anon', 'authenticated', 'service_role')
+    ),
+    -- Column-level grants: they exist only explicitly, in pg_attribute.attacl.
+    'columnAcl', (
+      select coalesce(json_agg(json_build_object(
+               'table', c.relname,
+               'column', att.attname,
+               'grantee', case when a.grantee = 0 then 'PUBLIC' else pg_get_userbyid(a.grantee) end,
+               'privilege', a.privilege_type)
+             order by c.relname, att.attname, a.grantee, a.privilege_type), '[]'::json)
+      from pg_attribute att
+      join pg_class c on c.oid = att.attrelid
+      cross join aclexplode(att.attacl) a
+      where c.relnamespace = 'public'::regnamespace and att.attnum > 0 and not att.attisdropped
+    ),
+    -- Every RLS policy, whole: the registry pins them, and a function a policy
+    -- calls is checked against the roles the policy applies to.
+    'policies', (
+      select coalesce(json_agg(json_build_object(
+               'table', c.relname,
+               'name', pol.polname,
+               'cmd', pol.polcmd::text,
+               'permissive', pol.polpermissive,
+               'roles', (select json_agg(case when r = 0 then 'PUBLIC' else pg_get_userbyid(r) end order by 1)
+                         from unnest(pol.polroles) r),
+               'using', pg_get_expr(pol.polqual, pol.polrelid),
+               'check', pg_get_expr(pol.polwithcheck, pol.polrelid),
+               'expr', concat_ws(' ', pg_get_expr(pol.polqual, pol.polrelid),
+                                      pg_get_expr(pol.polwithcheck, pol.polrelid)))
+             order by c.relname, pol.polname), '[]'::json)
+      from pg_policy pol
+      join pg_class c on c.oid = pol.polrelid
+      where c.relnamespace = 'public'::regnamespace
+    ),
+    -- The client roles themselves: attributes, and every membership that
+    -- involves them in either direction (inherited or SET-only alike).
+    'roles', (
+      select coalesce(json_agg(json_build_object(
+               'name', r.rolname, 'super', r.rolsuper, 'inherit', r.rolinherit,
+               'createrole', r.rolcreaterole, 'createdb', r.rolcreatedb,
+               'replication', r.rolreplication, 'login', r.rolcanlogin, 'bypassrls', r.rolbypassrls)
+             order by r.rolname), '[]'::json)
+      from pg_roles r
+      where r.rolname in ('anon', 'authenticated', 'service_role')
+    ),
+    'memberships', (
+      select coalesce(json_agg(json_build_object(
+               'role', pg_get_userbyid(m.roleid),
+               'member', pg_get_userbyid(m.member),
+               -- PostgreSQL 16 records INHERIT and SET per membership; on 15 they are absent (null).
+               'inherit', (to_jsonb(m) ->> 'inherit_option')::boolean,
+               'set', (to_jsonb(m) ->> 'set_option')::boolean,
+               'admin', m.admin_option)
+             order by pg_get_userbyid(m.roleid), pg_get_userbyid(m.member)), '[]'::json)
+      from pg_auth_members m
+      where pg_get_userbyid(m.roleid) in ('anon', 'authenticated', 'service_role')
+         or pg_get_userbyid(m.member) in ('anon', 'authenticated', 'service_role')
+    ),
+    -- Who may use, and who may create objects in, schema public.
+    'schemaPublic', (
+      select json_agg(json_build_object(
+               'role', r.name,
+               'usage', has_schema_privilege(r.name, 'public', 'USAGE'),
+               'create', has_schema_privilege(r.name, 'public', 'CREATE'))
+             order by r.name)
+      from privilege_roles r
+    )
   )
 );

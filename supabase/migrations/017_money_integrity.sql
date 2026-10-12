@@ -44,17 +44,40 @@
 --    keep working. TRUNCATE — granted to every client role by Supabase's
 --    defaults, and not covered by the row-level append-only triggers — is
 --    revoked on every money table, and refused outright on the two append-only
---    ones.
+--    ones. The table comment on wallets is restated to say so: the hosted
+--    project carries the wording 004 was applied with, which named only the
+--    client roles.
 --
 -- 7. Least privilege on functions. Every callable function was already limited
 --    to service_role, but the seven trigger functions kept EXECUTE for PUBLIC,
---    anon, authenticated and service_role, and the schema's default privileges
---    granted EXECUTE on every NEW function to all three client roles — so a
---    migration that forgot its REVOKE would publish a function at
---    /rest/v1/rpc. Trigger functions now grant EXECUTE to nobody (a trigger
---    does not need it to fire), new functions start with no client grant, and
---    src/lib/db/money-columns.ts states exactly who may execute each function;
---    scripts/test-db.sh fails on any difference.
+--    anon, authenticated and service_role, and every NEW function received
+--    EXECUTE twice over: from the schema's default privileges (anon,
+--    authenticated, service_role) and from PostgreSQL's built-in default
+--    (PUBLIC, which every role inherits) — so a migration that forgot its
+--    REVOKE would publish a function at /rest/v1/rpc. Trigger functions now
+--    grant EXECUTE to nobody (a trigger does not need it to fire), a new
+--    function is executable by its owner only until a migration grants more,
+--    and src/lib/db/money-columns.ts states exactly who may execute each
+--    function; scripts/test-db.sh fails on any difference.
+--
+-- 8. Two sign invariants the schema implied but did not state, and the last
+--    client write grants on money tables:
+--      * trading_orders.average_price is the volume-weighted average of the
+--        order's trades.price, which trades_price_positive keeps above zero.
+--        It is NULL until the first fill and positive after it; zero is not a
+--        state any order can be in.
+--      * ledger_entries.amount is the entry's unsigned magnitude (004); the
+--        direction is carried by the two signed deltas. Every posting scheme
+--        in 004 moves a non-zero X, ledger_entry_moves_something already
+--        requires a non-zero delta, and the one posting in the schema today
+--        (release_withdrawal_hold) passes withdrawals.amount, which is > 0. A
+--        zero amount with a non-zero delta is a posting that misreports what
+--        it moved; ledger_post refuses it before writing anything, and the
+--        table refuses it for any other writer.
+--      * tier_limits and trading_pairs still granted INSERT/UPDATE/DELETE to
+--        anon and authenticated from Supabase's default grants. The
+--        application only reads them; RLS has no write policy for either, so
+--        the grants were unusable — they go, and the read policies stay.
 --
 -- DEPLOYMENT ORDER. Apply 016 and this migration to the hosted project BEFORE
 -- deploying an application build that contains the matching LimitEngine: the
@@ -196,8 +219,11 @@ begin
       using errcode = 'invalid_parameter_value';
   end if;
 
-  if p_amount < 0 then
-    raise exception 'ledger_post: amount must be non-negative, got %', p_amount
+  -- The amount is what the entry moves; an entry that moves nothing is refused
+  -- by ledger_entry_moves_something, and one that claims to move nothing while
+  -- its deltas move funds is refused here.
+  if p_amount <= 0 then
+    raise exception 'ledger_post: amount must be positive, got %', p_amount
       using errcode = 'check_violation';
   end if;
 
@@ -434,6 +460,11 @@ grant execute on function public.limit_usage_total(uuid, public.limit_operation,
 revoke insert, update, delete on public.wallets from service_role;
 revoke insert, update, delete on public.ledger_entries from service_role;
 
+comment on table public.wallets is
+  'Derived projection of ledger_entries, not an independent source of truth
+   (spec §18). Only public.ledger_post() may change a balance: INSERT, UPDATE,
+   DELETE and TRUNCATE are revoked from anon, authenticated and service_role.';
+
 -- TRUNCATE skips row-level triggers, so forbid_mutation never sees it. PostgREST
 -- exposes no TRUNCATE, but the privilege should not exist for a client role.
 revoke truncate on
@@ -471,9 +502,38 @@ revoke all on function
   public.handle_new_user()
   from public, anon, authenticated, service_role;
 
--- A function created in public from now on starts with no grant for any client
--- role; each migration grants exactly what the function needs. (Per schema:
--- the default for other schemas, and the PUBLIC default that each function's
--- own REVOKE removes, are left as they are.)
+-- A function postgres creates from now on is executable by its owner only;
+-- each migration grants exactly what the function needs. PostgreSQL keeps two
+-- layers of default privileges and both granted EXECUTE: the per-schema one,
+-- where Supabase grants it to anon, authenticated and service_role in public,
+-- and the global one, whose built-in value grants it to PUBLIC. A per-schema
+-- rule can only add to the global default, never take from it, so PUBLIC's
+-- grant can only be revoked globally — which also covers functions postgres
+-- creates in other schemas, as intended. Functions that already exist keep the
+-- privileges they have; Supabase's own functions are created by other roles
+-- and are not affected.
 alter default privileges for role postgres in schema public
   revoke execute on functions from anon, authenticated, service_role;
+alter default privileges for role postgres
+  revoke execute on functions from public;
+
+-- -----------------------------------------------------------------------------
+-- 8. Sign invariants, and no client write privilege on a money table.
+-- -----------------------------------------------------------------------------
+
+-- NULL until the first fill; after it, an average of trades.price, which is
+-- positive (trades_price_positive).
+alter table public.trading_orders
+  add constraint trading_orders_average_price_positive
+  check (average_price is null or average_price > 0);
+
+-- The magnitude of a movement that ledger_entry_moves_something already requires
+-- to be non-zero. Supersedes 004's ledger_amount_non_negative (amount >= 0),
+-- which is left in place: it is implied, and dropping it buys nothing.
+alter table public.ledger_entries
+  add constraint ledger_entries_amount_positive check (amount > 0);
+
+-- RLS already refuses these writes (no write policy exists); the grants go too,
+-- so the refusal does not rest on RLS alone. SELECT and the *_public_read
+-- policies are unchanged.
+revoke insert, update, delete on public.tier_limits, public.trading_pairs from anon, authenticated;

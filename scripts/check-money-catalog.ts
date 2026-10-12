@@ -47,7 +47,7 @@ type Fn = {
   rowtypeColumns: string[];
   scalarResult: string;
   scalarNumericish: boolean;
-  executableBy: { anon: boolean; authenticated: boolean; service_role: boolean };
+  executableBy: { PUBLIC: boolean; anon: boolean; authenticated: boolean; service_role: boolean };
   source: string;
 };
 type Catalog = {
@@ -79,11 +79,8 @@ const functions = DB_FUNCTIONS as Record<
     result: readonly string[];
     scalarResult?: true;
     jsonArgs?: readonly string[];
-    executors: readonly string[];
   }
 >;
-const CLIENT_ROLES = ["anon", "authenticated", "service_role"] as const;
-const executorsOf = (fn: Fn) => CLIENT_ROLES.filter((role) => fn.executableBy[role]);
 
 /** Money tables whose rows are never changed or removed (forbid_mutation). */
 const APPEND_ONLY_MONEY_TABLES = ["ledger_entries", "limit_usage"];
@@ -192,10 +189,7 @@ for (const fn of catalog.functions ?? []) {
     if (!(TRIGGER_FUNCTIONS as readonly string[]).includes(fn.name)) {
       problems.push(`trigger function ${fn.name} is not listed in TRIGGER_FUNCTIONS`);
     }
-    const granted = executorsOf(fn);
-    if (granted.length > 0) {
-      problems.push(`trigger function ${fn.name} is executable by ${granted.join(", ")}; no role needs to call it`);
-    }
+    // Who may execute it is checked by scripts/check-privileges.ts.
     continue;
   }
   seen.add(fn.name);
@@ -253,16 +247,12 @@ for (const fn of catalog.functions ?? []) {
     problems.push(`${label}: DB_FUNCTIONS says its result is money as text, but it returns ${fn.scalarResult}`);
   }
 
-  // Exactly the roles the registry names — no more (least privilege), no fewer
-  // (a forgotten GRANT would break the server path that needs it).
-  const granted = executorsOf(fn);
-  const expected = [...entry.executors].sort();
-  if ([...granted].sort().join() !== expected.join()) {
-    problems.push(`${label} is executable by [${granted}], DB_FUNCTIONS says [${expected}]`);
-  }
+  // The exact executors are checked by scripts/check-privileges.ts against the
+  // privilege profile under test; this rule holds in every profile.
   const movesMoney = entry.args.length > 0 || entry.result.length > 0 || entry.scalarResult === true;
-  if (movesMoney && (fn.executableBy.anon || fn.executableBy.authenticated)) {
-    problems.push(`${label} carries money and is executable by ${fn.executableBy.anon ? "anon" : "authenticated"}`);
+  if (movesMoney && (fn.executableBy.PUBLIC || fn.executableBy.anon || fn.executableBy.authenticated)) {
+    const who = fn.executableBy.PUBLIC ? "PUBLIC" : fn.executableBy.anon ? "anon" : "authenticated";
+    problems.push(`${label} carries money and is executable by ${who}`);
   }
 
   // SQL may add, subtract, sum and compare money; it may not take it through a float.
@@ -287,6 +277,10 @@ for (const grant of catalog.tablePrivileges ?? []) {
     problems.push(`${grant.role} may ${grant.privilege} ${grant.table} directly; balances move only through ledger_post`);
   } else if (grant.privilege === "TRUNCATE" && grant.table in money) {
     problems.push(`${grant.role} may TRUNCATE ${grant.table}; no client role may empty a money table`);
+  } else if (grant.table in money && grant.role !== "service_role") {
+    // Money tables are written by the server only. RLS refusing the write is
+    // not enough on its own; the grant must not exist either.
+    problems.push(`${grant.role} may ${grant.privilege} ${grant.table}; only the server writes money tables`);
   }
 }
 for (const table of APPEND_ONLY_MONEY_TABLES) {

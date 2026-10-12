@@ -9,9 +9,10 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test:db": "./scripts/test-db.sh",
-    "test": "npm run test:unit && npm run test:db",
+    "test:db:019": "JIMOCEX_EXTRA_SQL=supabase/drafts/019_table_privileges.sql JIMOCEX_PRIVILEGE_PROFILE=019 ./scripts/test-db.sh",
+    "test": "npm run test:unit && npm run test:db && npm run test:db:019",
     "db:types": "echo 'Regenerate with: supabase gen types typescript --project-id <ref> > src/lib/supabase/database.types.ts'",
-    "test:unit": "node --test --experimental-strip-types \"src/**/__tests__/*.test.ts\"",
+    "test:unit": "node --test --experimental-strip-types \"src/**/__tests__/*.test.ts\" \"scripts/**/__tests__/*.test.ts\"",
     "verify": "npm run lint && npm run typecheck && npm run test && npm run build"
   },
   "dependencies": {

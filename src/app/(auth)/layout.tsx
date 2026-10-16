@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { BRAND_TAGLINE, Logo } from "@/components/brand/Logo";
+import { brand } from "@/config/brand";
 
 /**
  * Authentication shell (spec §34).
@@ -14,7 +15,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
   return (
     <div className="jc-auth">
       <aside className="jc-auth-brand">
-        <Link href="/" aria-label="JimoCex home">
+        <Link href="/" aria-label={`${brand.name} home`}>
           <Logo variant="compact" size={28} />
         </Link>
 
@@ -40,7 +41,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
       <main className="jc-auth-form-side">
         <div className="jc-auth-form">
           <div className="jc-auth-mobile-brand">
-            <Link href="/" aria-label="JimoCex home">
+            <Link href="/" aria-label={`${brand.name} home`}>
               <Logo variant="compact" size={26} />
             </Link>
           </div>

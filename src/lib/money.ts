@@ -508,6 +508,18 @@ export function maxMoney(a: Money, b: Money): Money {
   return a >= b ? a : b;
 }
 
+/**
+ * Whether `value` has no more than `places` fractional digits — e.g. whether a
+ * price fits a pair's `price_precision`. Lives here because it is arithmetic on
+ * the scaled representation, which only this module may do.
+ */
+export function hasAtMostDecimals(value: Money, places: number): boolean {
+  assertPlaces(places, "places");
+  const abs = value < 0n ? -value : value;
+  const unitsBelow = 10n ** BigInt(SCALE - places);
+  return abs % unitsBelow === 0n;
+}
+
 /* ===========================================================================
    Output
    =========================================================================== */

@@ -3,11 +3,12 @@ import type { Metadata } from "next";
 import { BRAND_TAGLINE } from "@/components/brand/Logo";
 import { PublicShell } from "@/components/layout";
 import { Card, CardContent, LinkButton } from "@/components/ui";
+import { brand } from "@/config/brand";
 import { getViewer } from "@/lib/auth/session";
 import { listMarkets } from "@/lib/markets/pairs";
 
 export const metadata: Metadata = {
-  title: "JimoCex — Global Markets & Digital Assets",
+  title: `${brand.name} — Global Markets & Digital Assets`,
   description:
     "One account for digital assets, currency markets and global trading. Exchange, trade and track markets on a single platform.",
 };

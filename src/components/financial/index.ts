@@ -26,4 +26,6 @@ export {
   WithdrawalStatus,
 } from "./Status";
 
+export { PriceSourceNote } from "./DataSource";
+
 export { formatAmount, formatPercent, signOf } from "./format";

@@ -61,6 +61,17 @@ export type PublicTrade = {
 export type CandleInterval = "1m" | "5m" | "15m" | "1h" | "4h" | "1d" | "1w";
 
 /**
+ * What kind of source is behind a provider — so a surface can label its figures
+ * honestly without inspecting the provider's class.
+ *
+ *   * "unavailable" — no source; every call refuses. Show "unavailable".
+ *   * "demo"        — a deterministic PROTOTYPE source. The numbers are not a
+ *                     market; every surface that shows them must say "Demo data".
+ *   * "live"        — a real, connected market feed. (None ships in this repo.)
+ */
+export type MarketDataKind = "unavailable" | "demo" | "live";
+
+/**
  * Prices are DecimalStrings, never JavaScript numbers — and never a plain
  * `string` either, because `String(json.price)` is a string that has already
  * been through a float.
@@ -74,6 +85,8 @@ export type CandleInterval = "1m" | "5m" | "15m" | "1h" | "4h" | "1d" | "1w";
  */
 export interface MarketDataProvider {
   readonly name: string;
+  /** What kind of source this is — drives the honest "Demo data" / "unavailable" label. */
+  readonly kind: MarketDataKind;
   /** False when the adapter has no credentials or no upstream configured. */
   isConfigured(): boolean;
 

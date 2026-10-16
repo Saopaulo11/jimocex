@@ -1334,6 +1334,41 @@ export type Database = {
         Returns: boolean
       }
       is_admin: { Args: never; Returns: boolean }
+      apply_fill: {
+        Args: {
+          p_order_id: string
+          p_provider_trade_id: string
+          p_base_amount: number
+          p_quote_amount: number
+          p_execution_price: number
+          p_fee_amount: number
+          p_fee_asset_id: string | null
+          p_executed_at?: string
+        }
+        Returns: string
+      }
+      place_limit_order: {
+        Args: {
+          p_user_id: string
+          p_pair_id: string
+          p_side: Database["public"]["Enums"]["order_side"]
+          p_price: number
+          p_amount: number
+          p_lock_asset_id: string
+          p_lock_amount: number
+          p_client_order_id?: string
+          p_fee?: number
+          p_metadata?: Json
+        }
+        Returns: string
+      }
+      cancel_order: {
+        Args: {
+          p_user_id: string
+          p_order_id: string
+        }
+        Returns: boolean
+      }
       ledger_post: {
         Args: {
           p_amount: number

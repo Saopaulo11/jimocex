@@ -3,47 +3,65 @@
 import { useState } from "react";
 
 import { AmountInput, Alert, Button, Card, CardContent } from "@/components/ui";
+import type { ExchangeQuote } from "@/lib/exchange/types";
+
+import { quoteExchangeAction } from "./actions";
 
 /**
- * Exchange widget (spec §30).
+ * Exchange widget (spec §30), prototype.
  *
- * The visual foundation of the exchange product, built against the real flow it
- * will carry: the customer enters a send amount, picks the pair, and sees the
- * rate, the fee and what arrives before committing.
- *
- * Every quoted figure is blank. No rate is computed here and none is guessed —
- * a quote comes from the server's QuoteService, priced by a market data
- * provider, and neither is connected. The form is interactive so the layout and
- * the states are real; the numbers stay absent until something authoritative
- * can supply them.
- *
- * When the engine is wired up, the client will still only ever send an amount,
- * a pair and a quote id. Rate, fee and output come back from the server and are
- * never sent to it.
+ * The customer enters a send amount and picks the pair; the rate, fee and
+ * receive amount come back from the server (demo market data + real fee rules).
+ * The client sends only the two assets and the amount string — never a rate, a
+ * fee or a receive amount. Confirmation is honest: no execution or liquidity
+ * provider is connected, so an exchange cannot be performed, and the result
+ * says so rather than pretending a trade settled.
  */
 export function ExchangeWidget({
   assets,
-  available,
+  quoteAvailable,
+  executionAvailable,
 }: {
   assets: { symbol: string; name: string; type: string }[];
-  /** False when no execution or liquidity provider is connected. */
-  available: boolean;
+  /** A (demo or live) rate can be quoted. */
+  quoteAvailable: boolean;
+  /** An exchange can actually be executed (needs a venue — none here). */
+  executionAvailable: boolean;
 }) {
   const [fromAsset, setFromAsset] = useState(assets.find((a) => a.symbol === "USDT")?.symbol ?? assets[0]?.symbol ?? "");
   const [toAsset, setToAsset] = useState(assets.find((a) => a.symbol === "BRL")?.symbol ?? assets[1]?.symbol ?? "");
   const [amount, setAmount] = useState("");
+  const [quote, setQuote] = useState<ExchangeQuote | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [confirmed, setConfirmed] = useState(false);
 
   const swap = () => {
     setFromAsset(toAsset);
     setToAsset(fromAsset);
+    setQuote(null);
+    setConfirmed(false);
   };
 
-  const assetSelect = (
-    id: string,
-    label: string,
-    value: string,
-    onChange: (next: string) => void,
-  ) => (
+  const getQuote = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setLoading(true);
+    setError(null);
+    setConfirmed(false);
+    try {
+      const result = await quoteExchangeAction({ fromSymbol: fromAsset, toSymbol: toAsset, amountInput: amount });
+      if (result.ok) {
+        setQuote(result.quote);
+      } else {
+        setQuote(null);
+        setError(result.message);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const assetSelect = (id: string, label: string, value: string, onChange: (next: string) => void) => (
     <>
       <label className="jc-sr-only" htmlFor={id}>
         {label}
@@ -52,9 +70,11 @@ export function ExchangeWidget({
         id={id}
         className="jc-amount-asset"
         value={value}
-        onChange={(event) => onChange(event.target.value)}
-        // An empty select renders as a bare chevron, which reads as a broken
-        // control rather than as missing data.
+        onChange={(event) => {
+          onChange(event.target.value);
+          setQuote(null);
+          setConfirmed(false);
+        }}
         disabled={assets.length === 0}
       >
         {assets.length === 0 ? (
@@ -73,12 +93,16 @@ export function ExchangeWidget({
   return (
     <Card variant="elevated">
       <CardContent>
-        <div className="jc-exchange-widget">
+        <form className="jc-exchange-widget" onSubmit={getQuote}>
           <AmountInput
             id="exchange-send"
             label="You send"
             value={amount}
-            onChange={(event) => setAmount(event.target.value)}
+            onChange={(event) => {
+              setAmount(event.target.value);
+              setQuote(null);
+              setConfirmed(false);
+            }}
             placeholder="0.00"
             assetSlot={assetSelect("exchange-from", "Asset to send", fromAsset, setFromAsset)}
           />
@@ -94,47 +118,68 @@ export function ExchangeWidget({
           <AmountInput
             id="exchange-receive"
             label="You receive"
-            value=""
+            value={quote ? quote.netReceive : ""}
             placeholder="—"
             readOnly
             assetSlot={assetSelect("exchange-to", "Asset to receive", toAsset, setToAsset)}
-            secondary={<span className="jc-muted">Quoted when a provider is connected</span>}
+            secondary={quote ? <span className="jc-muted">After a {quote.fee} {quote.feeAsset} fee</span> : <span className="jc-muted">Quoted on request</span>}
           />
 
           <div className="jc-summary" style={{ marginTop: "var(--jc-space-2)" }}>
             <div className="jc-summary-row">
               <span className="jc-summary-key">Rate</span>
-              <span className="jc-summary-val jc-muted">—</span>
+              <span className="jc-summary-val jc-numeric">
+                {quote ? `1 ${quote.fromSymbol} ≈ ${quote.rate} ${quote.toSymbol}` : <span className="jc-muted">—</span>}
+              </span>
             </div>
             <div className="jc-summary-row">
-              <span className="jc-summary-key">Network &amp; service fee</span>
-              <span className="jc-summary-val jc-muted">—</span>
-            </div>
-            <div className="jc-summary-row">
-              <span className="jc-summary-key">Estimated arrival</span>
-              <span className="jc-summary-val jc-muted">—</span>
+              <span className="jc-summary-key">Fee</span>
+              <span className="jc-summary-val jc-numeric">{quote ? `${quote.fee} ${quote.feeAsset}` : <span className="jc-muted">—</span>}</span>
             </div>
             <div className="jc-summary-row jc-summary-row--total">
-              <span className="jc-summary-key">Quote valid for</span>
-              <span className="jc-summary-val jc-muted">—</span>
+              <span className="jc-summary-key">You receive</span>
+              <span className="jc-summary-val jc-numeric">{quote ? `${quote.netReceive} ${quote.toSymbol}` : <span className="jc-muted">—</span>}</span>
             </div>
           </div>
 
-          {!available ? (
-            <Alert tone="warning" title="Exchange provider unavailable">
-              No liquidity or execution provider is connected on this deployment, so quotes cannot
-              be issued and exchanges cannot be executed.
+          {error ? (
+            <Alert tone="danger">{error}</Alert>
+          ) : null}
+
+          {quote?.demo ? (
+            <Alert tone="warning" title="Demo quote">
+              This rate comes from demo market data, not a live feed. The fee is computed from the real fee schedule.
             </Alert>
           ) : null}
 
-          <Button variant="primary" block size="lg" disabled={!available}>
-            {available ? "Get quote" : "Exchange unavailable"}
+          <Button type="submit" variant="primary" block size="lg" loading={loading} disabled={loading || !quoteAvailable || assets.length === 0}>
+            {quoteAvailable ? "Get quote" : "Quotes unavailable"}
           </Button>
 
+          {quote ? (
+            <Button
+              type="button"
+              variant="secondary"
+              block
+              size="lg"
+              disabled={!executionAvailable}
+              onClick={() => setConfirmed(true)}
+            >
+              {executionAvailable ? "Confirm exchange" : "Execution unavailable"}
+            </Button>
+          ) : null}
+
+          {confirmed && !executionAvailable ? (
+            <Alert tone="info" title="No exchange was performed">
+              This is a demo quote. No execution or liquidity provider is connected on this deployment, so the exchange
+              cannot be executed and nothing has moved.
+            </Alert>
+          ) : null}
+
           <p className="jc-caption" style={{ textAlign: "center" }}>
-            Rate and fee are calculated on the server and fixed for the life of a quote.
+            Rate and fee are calculated on the server. Limits apply per account tier and are checked for every exchange.
           </p>
-        </div>
+        </form>
       </CardContent>
     </Card>
   );

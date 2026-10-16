@@ -2,18 +2,32 @@ import type { Metadata } from "next";
 
 import { PublicShell } from "@/components/layout";
 import { Alert } from "@/components/ui";
+import { brand } from "@/config/brand";
 import { getViewer } from "@/lib/auth/session";
 import { listMarkets } from "@/lib/markets/pairs";
+import { getTickers } from "@/lib/markets/ticker";
+import type { MarketTicker } from "@/lib/markets/types";
 
 import { MarketsTable } from "./MarketsTable";
 
 export const metadata: Metadata = {
   title: "Markets",
-  description: "Track prices, volume and movement across every market listed on JimoCex.",
+  description: `Track prices, volume and movement across every market listed on ${brand.name}.`,
 };
 
 export default async function MarketsPage() {
-  const [viewer, { markets, pricesAvailable }] = await Promise.all([getViewer(), listMarkets()]);
+  const [viewer, { markets }, tickerData] = await Promise.all([getViewer(), listMarkets(), getTickers()]);
+
+  const tickers: Record<string, MarketTicker> = {};
+  for (const [pair, t] of tickerData.tickers) {
+    tickers[pair] = {
+      price: t.price,
+      changePercent24h: t.changePercent24h,
+      high24h: t.high24h,
+      low24h: t.low24h,
+      volume24h: t.volume24h,
+    };
+  }
 
   return (
     <PublicShell signedIn={Boolean(viewer)}>
@@ -28,14 +42,19 @@ export default async function MarketsPage() {
           </p>
         </header>
 
-        {!pricesAvailable ? (
+        {!tickerData.available ? (
           <Alert tone="info" title="Market data is currently unavailable">
-            No price feed is connected on this deployment. Pair listings below are real platform
-            configuration; prices, changes and volumes are left blank rather than estimated.
+            No price feed is connected on this deployment. Pair listings below are real platform configuration; prices,
+            changes and volumes are left blank rather than estimated.
+          </Alert>
+        ) : tickerData.demo ? (
+          <Alert tone="warning" title="Demo market data">
+            The pair listings are real platform configuration, but the prices, changes and volumes shown are
+            deterministic demo data — not a live market feed. They update once a day and are for demonstration only.
           </Alert>
         ) : null}
 
-        <MarketsTable markets={markets} pricesAvailable={pricesAvailable} />
+        <MarketsTable markets={markets} tickers={tickers} pricesAvailable={tickerData.available} />
       </div>
     </PublicShell>
   );

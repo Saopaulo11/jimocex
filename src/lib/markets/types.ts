@@ -43,3 +43,15 @@ export const MARKET_CATEGORIES: { id: "ALL" | PairType; label: string }[] = [
   { id: "CRYPTO_FIAT", label: "Crypto / Fiat" },
   { id: "FX", label: "FX" },
 ];
+
+/**
+ * A market ticker as it crosses to the client: exact decimal strings (or null
+ * when unknown), never floats. Keyed by pair symbol on the page.
+ */
+export type MarketTicker = {
+  price: string;
+  changePercent24h: string | null;
+  high24h: string | null;
+  low24h: string | null;
+  volume24h: string | null;
+};

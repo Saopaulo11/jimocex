@@ -20,7 +20,7 @@ more event triggers, Supabase's own roles. The first real run is the first test 
 | `supabase/drafts/019_preflight.sql` | sha256 in `019_preflight.sql.sha256` | read-only state check, before and after |
 | `supabase/tests/02_money_catalog.sql` | — | read-only catalog snapshot (one `SELECT`, JSON) |
 | `scripts/check-privileges.ts` | — | compares the snapshot with `scripts/privilege-registry.ts` |
-| `supabase/drafts/v4/apply_016_017.sql` (package v4) | sha256 in `apply_016_017.sql.sha256` (`2816d6898259be0057043b588f0becaceb053383050dab234b6ce788ebc2c081`); `README.md` beside it | 016 + 017; a separate rollout with its own authorization. Copied byte for byte from the session scratchpad in Phase 1.9; durable only once committed and pushed |
+| `supabase/drafts/v4/apply_016_017.sql` (package v4) | sha256 in `apply_016_017.sql.sha256` (`2816d6898259be0057043b588f0becaceb053383050dab234b6ce788ebc2c081`); `README.md` beside it | 016 + 017; a separate rollout with its own authorization. Committed in `cfd3136` and pushed to `feature/jimocex-mvp` (Phase 2.1), pinned by this sha256. For the hosted project only: never the way to install a new project |
 
 ## 0. Two stages, two authorizations
 
@@ -31,7 +31,7 @@ its preflight passes on the state that stage 1 leaves.
 | | Stage 1: package v4 | Stage 2: 019 |
 |---|---|---|
 | Authorization | the owner's go for v4, naming sha256 `2816d689…` — **not given** | the owner's go for 019, naming sha256 `69881ea7…` — **not given**; possible only after stage 1 and its postchecks passed |
-| Preconditions | (1) `supabase/drafts/v4/apply_016_017.sql` is committed and pushed, its sha256 checks, and the embedded-text check in its README gives `matches` twice; (2) therefore the 016/017 committed in the repository are the texts inside it (`73d599bb…`, `efbc5be4…`); (3) the deployed application is compatible: §11 (no reachable path depends on 016/017 today); (4) a backup or PITR point; (5) a window with little write traffic: v4 takes ACCESS EXCLUSIVE locks on money tables and gives up after 5 s per lock; (6) no long transaction open (query in §1) | §1 below |
+| Preconditions | (1) `supabase/drafts/v4/apply_016_017.sql` is the file committed in `cfd3136` and pushed (true since Phase 2.1), and, at rollout time on the machine that sends it, its sha256 still checks and the embedded-text check in its README gives `matches` twice; (2) therefore the 016/017 committed in the repository are the texts inside it (`73d599bb…`, `efbc5be4…`); (3) the deployed application is compatible: §11 (no reachable path depends on 016/017 today); (4) a backup or PITR point; (5) a window with little write traffic: v4 takes ACCESS EXCLUSIVE locks on money tables and gives up after 5 s per lock; (6) no long transaction open (query in §1) | §1 below |
 | Preflight (read-only) | `019_preflight.sql` gives the **015 signature**: `BLOCKED`, failures exactly `A3 H3 H4 O3 S1 S2 S3 S4 S5 S6`, `T1` and `V1` ok, warnings `D1` `M4` (seen on hosted, Phase 1.7). Anything else: stop. v4's own preflight then also requires the exact 015 fingerprint (`87f076b6…`, 1240 items) and history text | §2: `PASS`, and step 2 with profile 017 matches |
 | Application | the v4 file unchanged, one `DO` statement: `psql "<conn>" -X -v ON_ERROR_STOP=1 -f apply_016_017.sql`, or the SQL Editor with the whole file and the destructive-operation prompt (DROP FUNCTION). It writes its two history rows inside the same statement | §4 |
 | Postchecks | `DO` (psql) or "Success. No rows returned" (editor); then `019_preflight.sql` gives `PASS` (`H3`: rows md5 `5f7d9d01…`, `e83898e9…`; `S1`–`S6`, `A3`, `O3` ok); step 2 with profile 017 matches; the owner checks the limits path of the application | §5: failures exactly `A2 A4 A5 H4`; history md5 `5384d51b…`; step 2 with profile 019 |
@@ -41,6 +41,20 @@ its preflight passes on the state that stage 1 leaves.
 The two stages share the tools (`019_preflight.sql`, `02_money_catalog.sql`, `check-privileges.ts`) but
 not the expected results. Between stages, a regular read-only drift check compares with the signature of
 the current stage: the 015 signature, then `PASS`, then `A2 A4 A5 H4`.
+
+**A new project is neither stage.** A new, empty project, such as the Preview test database, is
+installed from `supabase/migrations` (001–018, 020, 021), one file at a time. The procedure is in
+`docs/preview-environment.md`, including the privileges the project must have before 001. Package v4 is
+never used there: it is built for the hosted 015 state only. 019 is not part of `supabase/migrations` on any project,
+and on a test project it also needs its own decision.
+
+**On the hosted project, 016 and 017 go in only through v4**, never as the separate files and never
+twice. Re-running a migration can succeed silently and still change the database. Observed locally
+(Phase 2.4, PostgreSQL 17.10, the re-run rolled back afterwards): `016_money_functions_return_text.sql`
+run again on a 017 database succeeds without an error, replaces 017's `reconcile_wallets()` with 016's,
+and removes `service_role`'s EXECUTE on it. The table of re-run results is in
+`docs/preview-environment.md` (Option A, step 4). These are local observations, not a guarantee for the
+hosted configuration.
 
 ## 1. Admission conditions for stage 2 (all of them)
 
@@ -337,7 +351,7 @@ Every place the application reaches the database, in the working tree. `src/` is
 | `src/lib/supabase/database.types.ts` | describes 017, written by hand | compile time only | — | — |
 
 **What detects a mismatch:**
-- `test:db` and `test:db:019` build the schema from the repository (001–017). They check the code against 017, never against the hosted 015.
+- `test:db` and `test:db:019` build the schema from the repository (001–018, 020, 021). They check the code against that, never against the hosted 015.
 - The unit tests do not reach a database: `limit-rules.test.ts` covers the pure rules.
 - On hosted, `019_preflight.sql` check S1 reports a missing `limit_usage_total` (read-only).
 - At run time `checkEligibility` refuses instead of guessing.
@@ -349,4 +363,4 @@ Every place the application reaches the database, in the working tree. `src/` is
 
 **Before any public deployment** (not part of 019):
 - **Next.js.** 16.3.5 was affected by seven advisories, among them GHSA-vcvr-r3jv-pc5j (critical, code execution through `next/og`'s `ImageResponse`, fixed in 16.3.6) and GHSA-cjq9-62q9-8jv4 (high, SSRF in Image Optimization, fixed in 16.3.8). Phase 2.2 pins `next` and `eslint-config-next` to 16.3.8, the last 16.3.x patch: `npm audit --omit=dev` reports nothing, and the five dev-only findings left (GHSA-vfj7-8cjw-p6xm in `braces`, through the lint plugin) have no patched version.
-- **The database behind a Preview.** There is one hosted project. A Preview pointed at it writes real rows (sign-ups) into it. The isolated test database and the Preview configuration are planned in `docs/preview-environment.md`.
+- **The database behind a Preview.** There is one hosted project. A Preview pointed at it writes real rows (sign-ups) into it. The isolated test database and the Preview configuration are planned in `docs/preview-environment.md`: the privileges a new project must have before 001, the fail-closed install of 001–017, why no migration is re-run, and the Auth settings to test before sign-up or reset is claimed to work.

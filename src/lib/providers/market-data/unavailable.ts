@@ -5,6 +5,7 @@ import { AppError } from "@/lib/errors";
 import type {
   Candle,
   CandleInterval,
+  MarketDataKind,
   MarketDataProvider,
   OrderBook,
   PublicTrade,
@@ -27,6 +28,7 @@ import type {
  */
 export class UnavailableMarketDataProvider implements MarketDataProvider {
   readonly name = "unavailable";
+  readonly kind: MarketDataKind = "unavailable";
 
   isConfigured(): boolean {
     return false;

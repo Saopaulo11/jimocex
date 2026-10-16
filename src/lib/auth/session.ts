@@ -195,3 +195,31 @@ export async function requireAdmin(
 
   return { ...viewer, adminId: adminRow.id, adminRole: adminRow.role };
 }
+
+/**
+ * The staff viewer, or null — a non-throwing `requireAdmin`.
+ *
+ * For a surface that wants to render an honest "not authorized" state rather
+ * than throw: the operator console layout uses this so a signed-in non-staff
+ * user sees a message, not an error page. It is the same real check as
+ * `requireAdmin` (an active `admin_users` row, which no user can create for
+ * themselves); there is no bypass.
+ */
+export async function getAdminViewer(
+  allowedRoles?: readonly Database["public"]["Enums"]["admin_role"][],
+): Promise<AdminViewer | null> {
+  const viewer = await getViewer();
+  if (!viewer) return null;
+
+  const supabase = await createClient();
+  const { data: adminRow, error } = await supabase
+    .from("admin_users")
+    .select("id, role, is_active")
+    .eq("user_id", viewer.userId)
+    .maybeSingle();
+
+  if (error || !adminRow || !adminRow.is_active) return null;
+  if (allowedRoles && !allowedRoles.includes(adminRow.role)) return null;
+
+  return { ...viewer, adminId: adminRow.id, adminRole: adminRow.role };
+}

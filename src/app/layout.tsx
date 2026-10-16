@@ -1,22 +1,24 @@
 import type { Metadata, Viewport } from "next";
 
+import { brand } from "@/config/brand";
+
 import "./globals.css";
+
+const title = `${brand.name} — ${brand.tagline}`;
 
 export const metadata: Metadata = {
   title: {
-    default: "JimoCex — Trade Crypto, FX & Global Assets",
-    template: "%s · JimoCex",
+    default: title,
+    template: `%s · ${brand.name}`,
   },
-  description:
-    "Trade and exchange crypto, fiat and global markets through one modern platform.",
+  description: brand.description,
   metadataBase: process.env.NEXT_PUBLIC_APP_URL
     ? new URL(process.env.NEXT_PUBLIC_APP_URL)
     : undefined,
   openGraph: {
-    title: "JimoCex — Trade Crypto, FX & Global Assets",
-    description:
-      "Trade and exchange crypto, fiat and global markets through one modern platform.",
-    siteName: "JimoCex",
+    title,
+    description: brand.description,
+    siteName: brand.name,
     type: "website",
   },
   // Nothing on this platform benefits from being indexed while it is still
@@ -26,8 +28,8 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#0a0f18",
-  colorScheme: "dark",
+  themeColor: brand.theme.backgroundColor,
+  colorScheme: brand.theme.colorScheme,
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

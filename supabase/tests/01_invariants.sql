@@ -1483,6 +1483,416 @@ end;
 $$;
 
 -- -----------------------------------------------------------------------------
+-- 021 — the demo trading set, as the migrations leave it (checked before any
+-- block below touches trading_pairs): exactly BTC-USDT, ETH-USDT and SOL-USDT
+-- accept orders, the other 13 pairs stay disabled, no pair swaps, and the three
+-- keep 011's precision and minimum size. Plus the ledger contract the demo
+-- funding script (scripts/fund-demo-account.ts) relies on for idempotency: a
+-- second ledger_post with the same dedup_key is refused and changes nothing.
+-- -----------------------------------------------------------------------------
+insert into auth.users (id, email) values
+  ('00000000-0000-4000-8000-0000000000a7', 'demo-funding@test.invalid');
+
+do $$
+declare
+  u    uuid := '00000000-0000-4000-8000-0000000000a7';
+  usdt uuid := (select id from public.assets where symbol = 'USDT');
+  avail numeric; locked numeric;
+begin
+  perform pg_temp.holds('021: exactly BTC-USDT, ETH-USDT and SOL-USDT are tradable',
+    (select array_agg(symbol order by symbol) from public.trading_pairs where trading_enabled)
+      = array['BTC-USDT', 'ETH-USDT', 'SOL-USDT']);
+  perform pg_temp.holds('021: the other 13 pairs stay disabled',
+    (select count(*) from public.trading_pairs where not trading_enabled) = 13
+    and (select count(*) from public.trading_pairs) = 16);
+  perform pg_temp.holds('021: no pair has swaps enabled',
+    not exists (select 1 from public.trading_pairs where swap_enabled));
+  perform pg_temp.holds('021: the three keep 011''s precision and minimum size',
+    (select count(*) from public.trading_pairs
+     where (symbol, price_precision, amount_precision, min_order_size) in
+           (('BTC-USDT', 2, 8, 0.0001), ('ETH-USDT', 2, 8, 0.001), ('SOL-USDT', 3, 6, 0.01))
+       and is_active) = 3);
+
+  -- The funding script's contract: an ADJUSTMENT under a fixed dedup_key.
+  perform public.ledger_post(u, usdt, 'ADJUSTMENT', 10000, 10000, 0, 'demo_funding', null,
+    'demo-funding:v1:' || u::text || ':USDT', '{"purpose": "demo opening balance"}');
+  perform pg_temp.rejects_with('demo funding: a second post under the same dedup_key is refused',
+    format($q$ select public.ledger_post(%L, %L, 'ADJUSTMENT', '10000', '10000', '0', 'demo_funding', null, %L) $q$,
+           u, usdt, 'demo-funding:v1:' || u::text || ':USDT'),
+    '23505');
+  select available_balance, locked_balance into avail, locked
+  from public.wallets where user_id = u and asset_id = usdt;
+  perform pg_temp.holds('demo funding: the refused repeat changes nothing (10000/0, one entry)',
+    avail = 10000 and locked = 0
+    and (select count(*) from public.ledger_entries where user_id = u) = 1);
+  perform pg_temp.holds('demo funding: the wallet reconciles with the ledger',
+    not exists (select 1 from public.reconcile_wallets() x where x.user_id = u));
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- §19 — place_limit_order / cancel_order (018): atomic reserve, idempotency,
+-- release on cancel, overdraft refusal, and owner scoping. Deltas are measured
+-- against a dedicated user so the block does not depend on earlier balances.
+-- -----------------------------------------------------------------------------
+insert into auth.users (id, email) values
+  ('00000000-0000-4000-8000-0000000000d4', 'dave@test.invalid');
+
+do $$
+declare
+  u     uuid := '00000000-0000-4000-8000-0000000000d4';
+  other uuid := '00000000-0000-4000-8000-0000000000a1';
+  usdt  uuid := (select id from public.assets where symbol = 'USDT');
+  pair  uuid;
+  o     uuid;
+  o2    uuid;
+  avail numeric;
+  locked numeric;
+begin
+  update public.trading_pairs set trading_enabled = true where symbol = 'BTC-USDT';
+  select id into pair from public.trading_pairs where symbol = 'BTC-USDT';
+  perform public.ledger_post(u, usdt, 'DEPOSIT', 100, 100, 0, 'test', null, 'tst:ord:fund');
+
+  -- Place a BUY LIMIT reserving 30 USDT (0.0005 @ 60000 = 30, no fee).
+  o := public.place_limit_order(u, pair, 'BUY', 60000, 0.0005, usdt, 30, 'ord-1', 0);
+  select available_balance, locked_balance into avail, locked
+  from public.wallets where user_id = u and asset_id = usdt;
+  perform pg_temp.holds('place_limit_order moves the reserve available->locked (70/30)', avail = 70 and locked = 30);
+  perform pg_temp.holds('place_limit_order opens the order with its lock recorded',
+    exists (select 1 from public.trading_orders where id = o and status = 'OPEN' and locked_amount = 30));
+  perform pg_temp.holds('place_limit_order posts exactly one HOLD for the order',
+    (select count(*) from public.ledger_entries where reference_id = o and entry_type = 'HOLD') = 1);
+
+  -- §20 idempotency: the same client_order_id returns the original and reserves nothing more.
+  o2 := public.place_limit_order(u, pair, 'BUY', 60000, 0.0005, usdt, 30, 'ord-1', 0);
+  perform pg_temp.holds('a retried placement returns the original order id', o2 = o);
+  select available_balance, locked_balance into avail, locked
+  from public.wallets where user_id = u and asset_id = usdt;
+  perform pg_temp.holds('a retried placement reserves nothing further (still 70/30)', avail = 70 and locked = 30);
+  perform pg_temp.holds('a retried placement posts no second HOLD',
+    (select count(*) from public.ledger_entries where reference_id = o and entry_type = 'HOLD') = 1);
+
+  -- Cancel releases exactly the held funds and marks the order terminal.
+  perform pg_temp.holds('cancel_order returns true for an open order', public.cancel_order(u, o));
+  select available_balance, locked_balance into avail, locked
+  from public.wallets where user_id = u and asset_id = usdt;
+  perform pg_temp.holds('cancel releases the hold (100/0)', avail = 100 and locked = 0);
+  perform pg_temp.holds('cancel marks the order CANCELLED with no residual lock',
+    exists (select 1 from public.trading_orders where id = o and status = 'CANCELLED' and locked_amount = 0));
+  perform pg_temp.holds('a second cancel is a no-op', not public.cancel_order(u, o));
+
+  -- Overdraft: a reserve beyond the available balance aborts the whole call —
+  -- ledger_post refuses, so no order row and no balance change survive.
+  perform pg_temp.rejects('place_limit_order cannot over-reserve', format(
+    $q$ select public.place_limit_order(%L, %L, 'BUY', '60000', '1', %L, '60000', 'ord-2', '0') $q$, u, pair, usdt));
+  select available_balance, locked_balance into avail, locked
+  from public.wallets where user_id = u and asset_id = usdt;
+  perform pg_temp.holds('a refused placement changes no balance (100/0)', avail = 100 and locked = 0);
+  perform pg_temp.holds('a refused placement leaves no order',
+    not exists (select 1 from public.trading_orders where user_id = u and client_order_id = 'ord-2'));
+
+  -- Owner scoping: another user cannot cancel this user's order.
+  o := public.place_limit_order(u, pair, 'BUY', 60000, 0.0005, usdt, 30, 'ord-3', 0);
+  perform pg_temp.holds('cancel_order ignores a different user', not public.cancel_order(other, o));
+  perform pg_temp.holds('the order is untouched after a foreign cancel',
+    exists (select 1 from public.trading_orders where id = o and status = 'OPEN' and locked_amount = 30));
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Slice 9 — the demo trading set, end to end: ONLY BTC-USDT, ETH-USDT and
+-- SOL-USDT are enabled (by migration 021; nothing here enables a pair). Proves, on those
+-- pairs, LIMIT OPEN → CANCELLED with a real HOLD and exactly one RELEASE, for a
+-- BUY (quote hold) and a SELL (base hold); that a still-disabled pair is refused
+-- by the database itself with nothing written; first-wins idempotency on a
+-- DIFFERENT request; invalid prices refused with nothing written; and that no
+-- order is ever filled — no trade row, nothing filled, no FILLED status.
+-- -----------------------------------------------------------------------------
+insert into auth.users (id, email) values
+  ('00000000-0000-4000-8000-0000000000f6', 'frank@test.invalid');
+
+do $$
+declare
+  u      uuid := '00000000-0000-4000-8000-0000000000f6';
+  usdt   uuid := (select id from public.assets where symbol = 'USDT');
+  sol    uuid := (select id from public.assets where symbol = 'SOL');
+  eth    uuid := (select id from public.assets where symbol = 'ETH');
+  brl    uuid := (select id from public.assets where symbol = 'BRL');
+  eth_usdt uuid;
+  sol_usdt uuid;
+  eth_brl  uuid;
+  buy    uuid;
+  sell   uuid;
+  replay uuid;
+  uavail numeric; ulock numeric; savail numeric; slock numeric;
+  entries_before bigint;
+  orders_before  bigint;
+begin
+  select id into eth_usdt from public.trading_pairs where symbol = 'ETH-USDT';
+  select id into sol_usdt from public.trading_pairs where symbol = 'SOL-USDT';
+  select id into eth_brl  from public.trading_pairs where symbol = 'ETH-BRL';
+
+  perform pg_temp.holds('demo set: exactly BTC-USDT, ETH-USDT, SOL-USDT are tradable',
+    (select array_agg(symbol order by symbol) from public.trading_pairs where trading_enabled)
+      = array['BTC-USDT', 'ETH-USDT', 'SOL-USDT']);
+  perform pg_temp.holds('demo set: enabling trading enables no swap',
+    not exists (select 1 from public.trading_pairs where swap_enabled));
+
+  perform public.ledger_post(u, usdt, 'DEPOSIT', 1000, 1000, 0, 'test', null, 'tst:demo:usdt');
+  perform public.ledger_post(u, sol,  'DEPOSIT', 10,   10,   0, 'test', null, 'tst:demo:sol');
+
+  -- ----------------------------------------------------------- BUY ETH-USDT
+  -- 0.1 ETH @ 3000 = 300 notional + 0.6 fee (0.2%) → 300.6 USDT held.
+  buy := public.place_limit_order(u, eth_usdt, 'BUY', 3000, 0.1, usdt, 300.6, 'demo-buy', 0.6);
+  select available_balance, locked_balance into uavail, ulock from public.wallets where user_id = u and asset_id = usdt;
+  perform pg_temp.holds('demo BUY ETH-USDT: 300.6 USDT moved available→locked (699.4/300.6)',
+    uavail = 699.4 and ulock = 300.6);
+  perform pg_temp.holds('demo BUY ETH-USDT: order OPEN on the right pair, locking USDT 300.6',
+    exists (select 1 from public.trading_orders
+            where id = buy and pair_id = eth_usdt and side = 'BUY' and type = 'LIMIT'
+              and status = 'OPEN' and locked_asset_id = usdt and locked_amount = 300.6));
+  perform pg_temp.holds('demo BUY ETH-USDT: exactly one HOLD of 300.6 USDT',
+    (select count(*) from public.ledger_entries
+     where reference_type = 'order' and reference_id = buy and entry_type = 'HOLD'
+       and asset_id = usdt and available_delta = -300.6 and locked_delta = 300.6) = 1
+    and (select count(*) from public.ledger_entries where reference_id = buy) = 1);
+  perform pg_temp.holds('demo BUY ETH-USDT: one order.place audit row',
+    (select count(*) from public.audit_logs where entity_id = buy and action = 'order.place') = 1);
+
+  -- §20 first-wins on a DIFFERENT request: same key, other side/price/amount/
+  -- lock. The original comes back unchanged and nothing more is reserved.
+  replay := public.place_limit_order(u, eth_usdt, 'SELL', 9999, 5, eth, 5, 'demo-buy', 0);
+  perform pg_temp.holds('demo replay: a different request on the same key returns the original order', replay = buy);
+  perform pg_temp.holds('demo replay: the original row is unchanged (BUY 0.1 @ 3000, 300.6 USDT locked)',
+    exists (select 1 from public.trading_orders
+            where id = buy and side = 'BUY' and price = 3000 and amount = 0.1
+              and locked_asset_id = usdt and locked_amount = 300.6 and status = 'OPEN'));
+  perform pg_temp.holds('demo replay: still exactly one HOLD, no second audit row',
+    (select count(*) from public.ledger_entries where reference_id = buy and entry_type = 'HOLD') = 1
+    and (select count(*) from public.audit_logs where entity_id = buy and action = 'order.place') = 1);
+  perform pg_temp.holds('demo replay: no order and no wallet for the replayed request''s ETH lock',
+    (select count(*) from public.trading_orders where user_id = u and client_order_id = 'demo-buy') = 1
+    and not exists (select 1 from public.wallets where user_id = u and asset_id = eth));
+  select available_balance, locked_balance into uavail, ulock from public.wallets where user_id = u and asset_id = usdt;
+  perform pg_temp.holds('demo replay: USDT balances unchanged (699.4/300.6)', uavail = 699.4 and ulock = 300.6);
+
+  -- ---------------------------------------------------------- SELL SOL-USDT
+  -- A SELL holds the BASE asset (2 SOL), never the quote.
+  sell := public.place_limit_order(u, sol_usdt, 'SELL', 150, 2, sol, 2, 'demo-sell', 0.6);
+  select available_balance, locked_balance into savail, slock from public.wallets where user_id = u and asset_id = sol;
+  perform pg_temp.holds('demo SELL SOL-USDT: 2 SOL moved available→locked (8/2)', savail = 8 and slock = 2);
+  select available_balance, locked_balance into uavail, ulock from public.wallets where user_id = u and asset_id = usdt;
+  perform pg_temp.holds('demo SELL SOL-USDT: the quote (USDT) is not touched', uavail = 699.4 and ulock = 300.6);
+  perform pg_temp.holds('demo SELL SOL-USDT: order OPEN locking SOL 2, one HOLD in SOL',
+    exists (select 1 from public.trading_orders
+            where id = sell and side = 'SELL' and status = 'OPEN' and locked_asset_id = sol and locked_amount = 2)
+    and (select count(*) from public.ledger_entries
+         where reference_id = sell and entry_type = 'HOLD' and asset_id = sol and locked_delta = 2) = 1);
+
+  -- ------------------------------------------------- refusals write nothing
+  select count(*) into entries_before from public.ledger_entries where user_id = u;
+  select count(*) into orders_before  from public.trading_orders where user_id = u;
+
+  -- A pair outside the demo set stays disabled, and the DATABASE refuses it —
+  -- not only the engine — even from the service role.
+  perform pg_temp.rejects_with_message('demo set: a still-disabled pair (ETH-BRL) is refused by the database',
+    format($q$ select public.place_limit_order(%L, %L, 'BUY', '15000', '0.01', %L, '150', 'demo-off', '0') $q$,
+           u, eth_brl, brl),
+    '23514', 'place_limit_order: trading is disabled for pair');
+  perform pg_temp.rejects_with_message('demo set: a zero price is refused',
+    format($q$ select public.place_limit_order(%L, %L, 'BUY', '0', '0.1', %L, '1', 'demo-p0', '0') $q$,
+           u, eth_usdt, usdt),
+    '23514', 'place_limit_order: a LIMIT order needs a positive price');
+  perform pg_temp.rejects_with_message('demo set: a negative price is refused',
+    format($q$ select public.place_limit_order(%L, %L, 'BUY', '-3000', '0.1', %L, '1', 'demo-pneg', '0') $q$,
+           u, eth_usdt, usdt),
+    '23514', 'place_limit_order: a LIMIT order needs a positive price');
+  perform pg_temp.rejects_with_message('demo set: a zero reserve is refused',
+    format($q$ select public.place_limit_order(%L, %L, 'BUY', '3000', '0.1', %L, '0', 'demo-l0', '0') $q$,
+           u, eth_usdt, usdt),
+    '23514', 'place_limit_order: the reserved amount must be positive');
+  -- Overdraft is the wallet CHECK — the exact constraint the server adapter maps
+  -- to INSUFFICIENT_BALANCE — both with a short wallet and with none at all.
+  perform pg_temp.rejects_with_message('demo set: a reserve beyond the available balance is refused',
+    format($q$ select public.place_limit_order(%L, %L, 'SELL', '150', '20', %L, '20', 'demo-over', '0') $q$,
+           u, sol_usdt, sol),
+    '23514', 'new row for relation "wallets" violates check constraint "wallets_available_non_negative"');
+  perform pg_temp.rejects_with_message('demo set: a SELL with no base wallet at all is refused as an overdraft',
+    format($q$ select public.place_limit_order(%L, %L, 'SELL', '3000', '0.1', %L, '0.1', 'demo-nowallet', '0') $q$,
+           u, eth_usdt, eth),
+    '23514', 'new row for relation "wallets" violates check constraint "wallets_available_non_negative"');
+
+  perform pg_temp.holds('demo set: refused placements leave no order and post no ledger entry',
+    (select count(*) from public.trading_orders where user_id = u) = orders_before
+    and (select count(*) from public.ledger_entries where user_id = u) = entries_before);
+  select available_balance, locked_balance into uavail, ulock from public.wallets where user_id = u and asset_id = usdt;
+  select available_balance, locked_balance into savail, slock from public.wallets where user_id = u and asset_id = sol;
+  perform pg_temp.holds('demo set: refused placements change no balance',
+    uavail = 699.4 and ulock = 300.6 and savail = 8 and slock = 2);
+  perform pg_temp.holds('demo set: no wallet survives a refused BRL or ETH lock',
+    not exists (select 1 from public.wallets where user_id = u and asset_id in (brl, eth)));
+
+  -- ------------------------------------------------- cancel: exactly one RELEASE
+  perform pg_temp.holds('demo cancel BUY: cancel_order returns true', public.cancel_order(u, buy));
+  perform pg_temp.holds('demo cancel BUY: a second cancel returns false', not public.cancel_order(u, buy));
+  perform pg_temp.holds('demo cancel SELL: cancel_order returns true', public.cancel_order(u, sell));
+  perform pg_temp.holds('demo cancel SELL: a second cancel returns false', not public.cancel_order(u, sell));
+
+  perform pg_temp.holds('demo cancel: exactly one RELEASE per order, equal to its HOLD',
+    (select count(*) from public.ledger_entries
+     where reference_id = buy and entry_type = 'RELEASE' and asset_id = usdt
+       and available_delta = 300.6 and locked_delta = -300.6) = 1
+    and (select count(*) from public.ledger_entries where reference_id = buy and entry_type = 'RELEASE') = 1
+    and (select count(*) from public.ledger_entries
+         where reference_id = sell and entry_type = 'RELEASE' and asset_id = sol
+           and available_delta = 2 and locked_delta = -2) = 1
+    and (select count(*) from public.ledger_entries where reference_id = sell and entry_type = 'RELEASE') = 1);
+  perform pg_temp.holds('demo cancel: both orders CANCELLED with no residual lock',
+    (select count(*) from public.trading_orders
+     where id in (buy, sell) and status = 'CANCELLED' and locked_amount = 0) = 2);
+  select available_balance, locked_balance into uavail, ulock from public.wallets where user_id = u and asset_id = usdt;
+  select available_balance, locked_balance into savail, slock from public.wallets where user_id = u and asset_id = sol;
+  perform pg_temp.holds('demo cancel: balances restored exactly (1000/0 USDT, 10/0 SOL)',
+    uavail = 1000 and ulock = 0 and savail = 10 and slock = 0);
+  perform pg_temp.holds('demo cancel: one order.cancel audit row per order',
+    (select count(*) from public.audit_logs where entity_id = buy  and action = 'order.cancel') = 1
+    and (select count(*) from public.audit_logs where entity_id = sell and action = 'order.cancel') = 1);
+
+  -- ------------------------------------------------- nothing was ever executed
+  perform pg_temp.holds('demo set: no trade row references any of this user''s orders',
+    not exists (select 1 from public.trades t
+                join public.trading_orders o on o.id in (t.buy_order_id, t.sell_order_id)
+                where o.user_id = u));
+  perform pg_temp.holds('demo set: nothing filled — filled 0, no average price, never FILLED',
+    not exists (select 1 from public.trading_orders
+                where user_id = u
+                  and (filled_amount <> 0 or average_price is not null
+                       or status in ('FILLED', 'PARTIALLY_FILLED'))));
+  perform pg_temp.holds('demo set: only DEPOSIT, HOLD and RELEASE entries were posted',
+    not exists (select 1 from public.ledger_entries
+                where user_id = u and entry_type not in ('DEPOSIT', 'HOLD', 'RELEASE')));
+  perform pg_temp.holds('demo set: wallets reconcile with the ledger for this user',
+    not exists (select 1 from public.reconcile_wallets() x where x.user_id = u));
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- §19/§6B — apply_fill (020): atomic fill settlement. BUY/SELL, partial/full,
+-- price improvement, VWAP, exact residual release, idempotency on
+-- provider_trade_id, over-fill refusal, terminal-order refusal, fee validation,
+-- cancel-after-partial, and the reconciliation invariant after it all.
+-- -----------------------------------------------------------------------------
+insert into auth.users (id, email) values
+  ('00000000-0000-4000-8000-0000000000e5', 'eve@test.invalid');
+
+do $$
+declare
+  u      uuid := '00000000-0000-4000-8000-0000000000e5';
+  usdt   uuid := (select id from public.assets where symbol = 'USDT');
+  btc    uuid := (select id from public.assets where symbol = 'BTC');
+  pair   uuid;
+  buy    uuid;
+  sell   uuid;
+  small  uuid;
+  tr     uuid;
+  tr_dup uuid;
+  uavail numeric; ulock numeric; bavail numeric; block numeric;
+  ostatus public.order_status; ofilled numeric; olock numeric; oavg numeric;
+begin
+  update public.trading_pairs set trading_enabled = true where symbol = 'BTC-USDT';
+  select id into pair from public.trading_pairs where symbol = 'BTC-USDT';
+
+  -- ------------------------------------------------------------- BUY, 2 fills
+  -- Reserve 100,200 USDT (notional 100,000 + fee 200) for BUY 1 BTC @ 100,000.
+  perform public.ledger_post(u, usdt, 'DEPOSIT', 100200, 100200, 0, 'test', null, 'tst:fill:buyfund');
+  buy := public.place_limit_order(u, pair, 'BUY', 100000, 1, usdt, 100200, 'fill-buy', 200);
+
+  -- Fill #1: 0.25 BTC @ 99,500 (price improvement) → quote 24,875, fee 49.75.
+  tr := public.apply_fill(buy, 'f-b1', 0.25, 24875, 99500, 49.75, usdt, now());
+  select status, filled_amount, locked_amount, average_price into ostatus, ofilled, olock, oavg
+  from public.trading_orders where id = buy;
+  perform pg_temp.holds('apply_fill BUY partial: order PARTIALLY_FILLED, filled 0.25',
+    ostatus = 'PARTIALLY_FILLED' and ofilled = 0.25);
+  perform pg_temp.holds('apply_fill BUY partial: reserve drawn to 75,275.25', olock = 75275.25);
+  select available_balance, locked_balance into uavail, ulock from public.wallets where user_id = u and asset_id = usdt;
+  select available_balance, locked_balance into bavail, block from public.wallets where user_id = u and asset_id = btc;
+  perform pg_temp.holds('apply_fill BUY partial: quote 0 avail / 75,275.25 locked', uavail = 0 and ulock = 75275.25);
+  perform pg_temp.holds('apply_fill BUY partial: base 0.25 credited to available', bavail = 0.25 and block = 0);
+  perform pg_temp.holds('apply_fill BUY partial: trade settled and recorded',
+    exists (select 1 from public.trades where id = tr and provider_trade_id = 'f-b1' and settled_at is not null));
+
+  -- Fill #2: 0.75 BTC @ 99,500 → completes. Residual 501 released (100,200 − 99,699).
+  perform public.apply_fill(buy, 'f-b2', 0.75, 74625, 99500, 149.25, usdt, now());
+  select status, filled_amount, locked_amount, average_price into ostatus, ofilled, olock, oavg
+  from public.trading_orders where id = buy;
+  perform pg_temp.holds('apply_fill BUY complete: FILLED, filled 1, no residual lock',
+    ostatus = 'FILLED' and ofilled = 1 and olock = 0);
+  perform pg_temp.holds('apply_fill BUY complete: VWAP 99,500', oavg = 99500);
+  select available_balance, locked_balance into uavail, ulock from public.wallets where user_id = u and asset_id = usdt;
+  select available_balance, locked_balance into bavail, block from public.wallets where user_id = u and asset_id = btc;
+  perform pg_temp.holds('apply_fill BUY complete: price-improvement refund (501 avail, 0 locked)', uavail = 501 and ulock = 0);
+  perform pg_temp.holds('apply_fill BUY complete: full base 1 BTC held', bavail = 1 and block = 0);
+
+  -- Idempotency: the same provider_trade_id returns the original trade, changes nothing.
+  tr_dup := public.apply_fill(buy, 'f-b1', 0.25, 24875, 99500, 49.75, usdt, now());
+  perform pg_temp.holds('apply_fill idempotent: duplicate returns the original trade id', tr_dup = tr);
+  perform pg_temp.holds('apply_fill idempotent: still exactly two trades for the order',
+    (select count(*) from public.trades where buy_order_id = buy) = 2);
+  select available_balance into uavail from public.wallets where user_id = u and asset_id = usdt;
+  perform pg_temp.holds('apply_fill idempotent: balances unchanged by the replay', uavail = 501);
+
+  -- A NEW fill on a terminal (FILLED) order is refused.
+  perform pg_temp.rejects('apply_fill refuses a new fill on a FILLED order',
+    format($q$ select public.apply_fill(%L, 'f-b3', '0.1', '9950', '99500', '0', null, now()) $q$, buy));
+
+  -- ------------------------------------------------------------------- SELL
+  -- eve now holds 1 BTC. SELL 1 BTC @ 100,000 reserves 1 BTC (base).
+  sell := public.place_limit_order(u, pair, 'SELL', 100000, 1, btc, 1, 'fill-sell', 0);
+  -- Fill 0.4 BTC @ 100,500 → proceeds 40,200 USDT, fee 80.4 from proceeds.
+  perform public.apply_fill(sell, 'f-s1', 0.4, 40200, 100500, 80.4, usdt, now());
+  select status, filled_amount, locked_amount into ostatus, ofilled, olock from public.trading_orders where id = sell;
+  perform pg_temp.holds('apply_fill SELL partial: PARTIALLY_FILLED, filled 0.4, 0.6 base locked',
+    ostatus = 'PARTIALLY_FILLED' and ofilled = 0.4 and olock = 0.6);
+  select available_balance, locked_balance into bavail, block from public.wallets where user_id = u and asset_id = btc;
+  select available_balance, locked_balance into uavail, ulock from public.wallets where user_id = u and asset_id = usdt;
+  perform pg_temp.holds('apply_fill SELL partial: base 0 avail / 0.6 locked', bavail = 0 and block = 0.6);
+  perform pg_temp.holds('apply_fill SELL partial: proceeds net of fee (501 + 40,119.6)', uavail = 40620.6 and ulock = 0);
+
+  -- Cancel after a partial fill: settled base kept, remaining reservation released.
+  perform pg_temp.holds('cancel after partial fill returns true', public.cancel_order(u, sell));
+  select status, filled_amount, locked_amount into ostatus, ofilled, olock from public.trading_orders where id = sell;
+  perform pg_temp.holds('cancel after partial: CANCELLED, settled 0.4 preserved, no residual lock',
+    ostatus = 'CANCELLED' and ofilled = 0.4 and olock = 0);
+  select available_balance, locked_balance into bavail, block from public.wallets where user_id = u and asset_id = btc;
+  perform pg_temp.holds('cancel after partial: the remaining 0.6 base is released to available', bavail = 0.6 and block = 0);
+
+  -- ------------------------------------------------------ validation refusals
+  -- A small OPEN order to attack; it must be untouched by every refusal.
+  small := public.place_limit_order(u, pair, 'BUY', 100000, 0.001, usdt, 100, 'fill-small', 0);
+  perform pg_temp.rejects('apply_fill refuses over-fill',
+    format($q$ select public.apply_fill(%L, 'f-of', '0.002', '200', '100000', '0', null, now()) $q$, small));
+  perform pg_temp.rejects('apply_fill refuses a zero base amount',
+    format($q$ select public.apply_fill(%L, 'f-zero', '0', '0', '100000', '0', null, now()) $q$, small));
+  perform pg_temp.rejects('apply_fill refuses a negative fee',
+    format($q$ select public.apply_fill(%L, 'f-neg', '0.0005', '50', '100000', '-1', %L, now()) $q$, small, usdt));
+  perform pg_temp.rejects('apply_fill refuses a fee not in the quote asset (gap G2)',
+    format($q$ select public.apply_fill(%L, 'f-fa', '0.0005', '50', '100000', '1', %L, now()) $q$, small, btc));
+  select status, filled_amount, locked_amount into ostatus, ofilled, olock from public.trading_orders where id = small;
+  perform pg_temp.holds('a refused fill leaves the order untouched (OPEN, filled 0, 100 locked)',
+    ostatus = 'OPEN' and ofilled = 0 and olock = 100);
+  perform pg_temp.holds('a refused fill posts no trade',
+    not exists (select 1 from public.trades where buy_order_id = small));
+
+  -- The reconciliation invariant holds after every settlement: each of eve's
+  -- wallets equals the sum of its ledger deltas. Scoped to this user because an
+  -- earlier block deliberately corrupts another wallet to prove reconcile_wallets
+  -- reports drift.
+  perform pg_temp.holds('apply_fill keeps the settled user''s wallets reconciled with the ledger',
+    not exists (select 1 from public.reconcile_wallets() x where x.user_id = u));
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
 -- EXECUTE: every function in public, called as every client role
 -- -----------------------------------------------------------------------------
 
@@ -1499,12 +1909,26 @@ declare
   usdt uuid := (select id from public.assets where symbol = 'USDT');
   btc  uuid := (select id from public.assets where symbol = 'BTC');
   q    uuid;
+  pair uuid;
   t    text;
+  fill_order uuid;
 begin
   insert into public.swap_quotes (user_id, from_asset_id, to_asset_id, from_amount,
                                   rate, fee, output_amount, rate_source, expires_at)
   values (c, usdt, btc, 1000, 0.00002, 5, 0.0199, 'test', now() + interval '5 min')
   returning id into q;
+
+  -- place_limit_order (018) actually places an order when service_role runs it
+  -- in the matrix, so it needs a tradable pair and a funded wallet. Enable one
+  -- pair and give carol enough USDT to cover the 5-USDT reserve below.
+  update public.trading_pairs set trading_enabled = true where symbol = 'BTC-USDT';
+  select id into pair from public.trading_pairs where symbol = 'BTC-USDT';
+  perform public.ledger_post(c, usdt, 'DEPOSIT', 100, 100, 0, 'test', null, 'tst:order-exec-fund');
+
+  -- apply_fill (020) settles a real fill when service_role runs it in the
+  -- matrix, so it needs a live order to fill. Place a dedicated BUY reserving 5
+  -- USDT; the matrix fill of 0.0001 @ 50000 completes it, then is rolled back.
+  fill_order := public.place_limit_order(c, pair, 'BUY', 50000, 0.0001, usdt, 5, 'tst-exec-fill-order', 0);
 
   -- Called by the server only (scripts/privilege-registry.ts names the caller).
   insert into function_calls (name, call, executors) values
@@ -1517,6 +1941,9 @@ begin
     ('expire_stale_quotes', 'select public.expire_stale_quotes()', '{service_role}'),
     ('mark_trade_settled', format('select public.mark_trade_settled(%L)', gen_random_uuid()), '{service_role}'),
     ('release_withdrawal_hold', format('select public.release_withdrawal_hold(%L)', gen_random_uuid()), '{service_role}'),
+    ('place_limit_order', format($q$ select public.place_limit_order(%L, %L, 'BUY', '50000', '0.0001', %L, '5', 'tst-exec-order', '0') $q$, c, pair, usdt), '{service_role}'),
+    ('cancel_order', format('select public.cancel_order(%L, %L)', c, gen_random_uuid()), '{service_role}'),
+    ('apply_fill', format($q$ select public.apply_fill(%L, 'tst-exec-fill', '0.0001', '5', '50000', '0', null, now()) $q$, fill_order), '{service_role}'),
     -- They answer for auth.uid(). 017 keeps Supabase's default grant to
     -- service_role; 019 withdraws it, and no role is granted it instead.
     ('is_admin', 'select public.is_admin()',

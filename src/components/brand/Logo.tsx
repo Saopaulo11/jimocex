@@ -1,7 +1,11 @@
+import { brand } from "@/config/brand";
+
 import { LogoMark } from "./LogoMark";
 
 /**
- * The JimoCex logo. Every placement in the product goes through this component.
+ * The brand logo. Every placement in the product goes through this component,
+ * and the name it renders comes from the central brand config (`@/config/brand`)
+ * — not a literal here — so a white-label client changes it in one place.
  *
  * Variants:
  *   full     mark + wordmark, optionally with the tagline. Marketing surfaces.
@@ -10,8 +14,10 @@ import { LogoMark } from "./LogoMark";
  *
  * The wordmark is set in the brand serif rather than drawn as paths, so it stays
  * selectable text, scales with the user's font settings, and costs nothing to
- * load. The gold is confined to "Cex" and the monogram; "Jimo" stays ivory,
- * which is what keeps the lockup from reading as a gold logo.
+ * load. A wordmark may be a plain name or a two-tone split — the JimoCex default
+ * splits "Jimo" (ivory) + "Cex" (gold), which keeps the lockup from reading as a
+ * gold logo. A plain-string wordmark renders in the text colour with the gold
+ * confined to the monogram.
  */
 
 type Variant = "full" | "compact" | "mark";
@@ -27,8 +33,9 @@ type Props = {
   className?: string;
 };
 
-export const BRAND_NAME = "JimoCex";
-export const BRAND_TAGLINE = "Global markets. Real opportunities.";
+// Back-compat re-exports, now sourced from the central brand configuration.
+export const BRAND_NAME = brand.name;
+export const BRAND_TAGLINE = brand.tagline;
 
 export function Logo({
   variant = "compact",
@@ -42,6 +49,9 @@ export function Logo({
   }
 
   const showTagline = variant === "full" && tagline;
+  const textColor = monochrome ? "currentColor" : "var(--jc-text)";
+  const accentColor = monochrome ? "currentColor" : "var(--jc-gold)";
+  const wordmark = brand.wordmark;
 
   return (
     <span
@@ -61,8 +71,14 @@ export function Logo({
             whiteSpace: "nowrap",
           }}
         >
-          <span style={{ color: monochrome ? "currentColor" : "var(--jc-text)" }}>Jimo</span>
-          <span style={{ color: monochrome ? "currentColor" : "var(--jc-gold)" }}>Cex</span>
+          {typeof wordmark === "string" ? (
+            <span style={{ color: textColor }}>{wordmark}</span>
+          ) : (
+            <>
+              <span style={{ color: textColor }}>{wordmark.primary}</span>
+              <span style={{ color: accentColor }}>{wordmark.accent}</span>
+            </>
+          )}
         </span>
 
         {showTagline ? (

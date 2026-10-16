@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
 
 import { PublicShell } from "@/components/layout";
-import { Card, CardContent } from "@/components/ui";
+import { Alert, Card, CardContent } from "@/components/ui";
 import { getViewer } from "@/lib/auth/session";
 import { listAssets, listMarkets } from "@/lib/markets/pairs";
+import { getTickers } from "@/lib/markets/ticker";
 
 import { ExchangeWidget } from "./ExchangeWidget";
 
@@ -19,11 +20,19 @@ const STEPS = [
 ];
 
 export default async function ExchangePage() {
-  const [viewer, assets, { markets }] = await Promise.all([getViewer(), listAssets(), listMarkets()]);
+  const [viewer, assets, { markets }, tickers] = await Promise.all([
+    getViewer(),
+    listAssets(),
+    listMarkets(),
+    getTickers(),
+  ]);
 
-  // Honest capability check: the exchange is available only if some listed pair
-  // actually has swaps enabled. None does, because no provider is connected.
-  const available = markets.some((market) => market.swapEnabled);
+  // Two separate capabilities: a rate can be quoted (demo or live market data),
+  // and an exchange can be executed (a pair with swaps enabled + a venue). The
+  // second is false here — no provider is connected — so quotes work but
+  // execution does not, and the UI says exactly that.
+  const quoteAvailable = tickers.available;
+  const executionAvailable = markets.some((market) => market.swapEnabled);
 
   return (
     <PublicShell signedIn={Boolean(viewer)}>
@@ -48,6 +57,13 @@ export default async function ExchangePage() {
               </p>
             </header>
 
+            {quoteAvailable && tickers.demo ? (
+              <Alert tone="warning" title="Demo rates">
+                Quotes use deterministic demo market data on this deployment, and no execution provider is connected —
+                so you can see a full quote, but an exchange cannot be executed. Fees are from the real fee schedule.
+              </Alert>
+            ) : null}
+
             <div
               style={{
                 display: "grid",
@@ -57,7 +73,7 @@ export default async function ExchangePage() {
               }}
             >
               <div style={{ maxWidth: 440 }}>
-                <ExchangeWidget assets={assets} available={available} />
+                <ExchangeWidget assets={assets} quoteAvailable={quoteAvailable} executionAvailable={executionAvailable} />
               </div>
 
               <div className="jc-stack-lg">

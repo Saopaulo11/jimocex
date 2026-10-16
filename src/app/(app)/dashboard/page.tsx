@@ -6,8 +6,10 @@ import {
   CurrencyAmount,
   EmailVerification,
   KycStatus,
+  PriceSourceNote,
   Stat,
 } from "@/components/financial";
+import { OrdersTable, TradesTable } from "@/components/trade";
 import {
   Alert,
   Card,
@@ -22,7 +24,10 @@ import {
 } from "@/components/ui";
 import { requireUser } from "@/lib/auth/session";
 import { moneySelect } from "@/lib/db/money-columns";
-import { fromDatabase, fromDatabaseNullable, isZero } from "@/lib/money";
+import { fromDatabaseNullable, isPositive, parseMoney } from "@/lib/money";
+import { getPortfolio } from "@/lib/portfolio/portfolio";
+import { allocationBarWidth, allocationLabel } from "@/lib/portfolio/valuation";
+import { getRecentOrders, getTradeHistory } from "@/lib/trade/history";
 import { createClient } from "@/lib/supabase/server";
 
 export const metadata: Metadata = { title: "Overview" };
@@ -42,62 +47,35 @@ const OPERATION_LABEL: Record<string, string> = {
   FIAT_WITHDRAWAL: "Fiat withdrawal",
 };
 
-const OPERATION_ORDER = [
-  "SWAP",
-  "TRADE",
-  "CRYPTO_DEPOSIT",
-  "CRYPTO_WITHDRAWAL",
-  "FIAT_DEPOSIT",
-  "FIAT_WITHDRAWAL",
+const OPERATION_ORDER = ["SWAP", "TRADE", "CRYPTO_DEPOSIT", "CRYPTO_WITHDRAWAL", "FIAT_DEPOSIT", "FIAT_WITHDRAWAL"];
+
+const QUICK_ACTIONS = [
+  { label: "Deposit", href: "/wallets/deposit", body: "Add crypto to your account." },
+  { label: "Withdraw", href: "/wallets/withdraw", body: "Send crypto to an external address." },
+  { label: "Trade", href: "/trade", body: "Place limit orders on a market." },
+  { label: "Convert", href: "/exchange", body: "Exchange one asset for another." },
 ];
 
 export default async function DashboardPage() {
   const viewer = await requireUser();
   const supabase = await createClient();
 
-  // Read through the user-scoped client: RLS confirms these rows are theirs
-  // rather than this page trusting the id it was handed.
-  const [{ data: tier }, { data: limits }, { data: wallets }] = await Promise.all([
-    supabase
-      .from("account_tiers")
-      .select("code, name, description")
-      .eq("code", viewer.profile.tier_code)
-      .single(),
+  const [{ data: tier }, { data: limits }, portfolio, recentOrders, recentTrades] = await Promise.all([
+    supabase.from("account_tiers").select("code, name, description").eq("code", viewer.profile.tier_code).single(),
     supabase
       .from("tier_limits")
       .select(moneySelect("tier_limits", "operation, window_kind, quote_currency, max_amount"))
       .eq("tier_code", viewer.profile.tier_code)
       .eq("is_active", true)
-      // moneySelect builds the select at runtime, so supabase-js cannot infer
-      // the row shape from a literal. Declaring it here is also where the money
-      // columns are stated to be strings, which is the point of the cast.
       .overrideTypes<
-        {
-          operation: string;
-          window_kind: string;
-          quote_currency: string;
-          max_amount: string | null;
-        }[],
+        { operation: string; window_kind: string; quote_currency: string; max_amount: string | null }[],
         { merge: false }
       >(),
-    supabase
-      .from("wallets")
-      .select(moneySelect("wallets", "id, available_balance, locked_balance"))
-      .overrideTypes<{ id: string; available_balance: string; locked_balance: string }[], { merge: false }>(),
+    getPortfolio(),
+    getRecentOrders(5),
+    getTradeHistory(5),
   ]);
 
-  // Both balance columns were cast to text by moneySelect, so fromDatabase
-  // parses the exact decimal. If a cast is ever dropped it throws here naming
-  // the column, rather than silently comparing a rounded value.
-  const hasFunds = (wallets ?? []).some((wallet) => {
-    const available = fromDatabase(wallet.available_balance, "wallets.available_balance");
-    const locked = fromDatabase(wallet.locked_balance, "wallets.locked_balance");
-    return !isZero(available) || !isZero(locked);
-  });
-
-  // Parsed where it is read, like the balances: a limit is displayed from
-  // Money, so a dropped cast throws here naming the column instead of
-  // rendering whatever arrived.
   const sortedLimits = (limits ?? [])
     .map((limit) => ({
       operation: limit.operation,
@@ -106,11 +84,14 @@ export default async function DashboardPage() {
       max: fromDatabaseNullable(limit.max_amount, "tier_limits.max_amount"),
     }))
     .sort((a, b) => {
-      const byOperation =
-        OPERATION_ORDER.indexOf(a.operation) - OPERATION_ORDER.indexOf(b.operation);
+      const byOperation = OPERATION_ORDER.indexOf(a.operation) - OPERATION_ORDER.indexOf(b.operation);
       if (byOperation !== 0) return byOperation;
       return a.window_kind.localeCompare(b.window_kind);
     });
+
+  const topHoldings = portfolio.holdings
+    .filter((h) => h.valueUsd !== null && isPositive(parseMoney(h.total)))
+    .slice(0, 6);
 
   return (
     <div className="jc-container jc-stack-lg">
@@ -136,46 +117,90 @@ export default async function DashboardPage() {
 
       {!viewer.emailVerified ? (
         <Alert tone="warning" title="Your email address is not confirmed">
-          You can sign in and look around, but operations that require a verified address will ask
-          for confirmation first.
+          You can sign in and look around, but operations that require a verified address will ask for confirmation
+          first.
         </Alert>
       ) : null}
 
-      {/* ------------------------------------------------------------ portfolio */}
+      {/* -------------------------------------------------------------- portfolio */}
       <Card>
-        <CardHeader title="Portfolio" subtitle="Across all assets" as="h2" />
+        <CardHeader
+          title="Portfolio"
+          subtitle={`Estimated value in ${portfolio.reportingCurrency}`}
+          as="h2"
+          action={<PriceSourceNote demo={portfolio.demo} available={portfolio.valued} context="Valuation" />}
+        />
         <CardContent>
-          {hasFunds ? (
-            <div className="jc-stat-pair">
-              <Stat label="Available" value={<span className="jc-amount-display jc-amount-display--lg">See wallets</span>} />
-              <Stat label="Locked" value={<span className="jc-amount-display jc-amount-display--lg">See wallets</span>} />
+          {portfolio.valued && portfolio.totalUsd !== null ? (
+            <>
+              <Stat
+                label="Total value"
+                value={<CurrencyAmount value={parseMoney(portfolio.totalUsd)} symbol="USD" decimals={2} size="xl" />}
+              />
+              <div className="jc-stat-pair" style={{ marginTop: "var(--jc-space-5)" }}>
+                <Stat
+                  label="Available"
+                  value={
+                    portfolio.availableUsd === null ? (
+                      <span className="jc-muted">—</span>
+                    ) : (
+                      <CurrencyAmount value={parseMoney(portfolio.availableUsd)} symbol="USD" decimals={2} size="lg" />
+                    )
+                  }
+                />
+                <Stat
+                  label="Locked"
+                  value={
+                    portfolio.lockedUsd === null ? (
+                      <span className="jc-muted">—</span>
+                    ) : (
+                      <CurrencyAmount value={parseMoney(portfolio.lockedUsd)} symbol="USD" decimals={2} size="lg" />
+                    )
+                  }
+                  hint="Reserved for open orders and pending withdrawals"
+                />
+              </div>
+
+              {topHoldings.length > 0 ? (
+                <div className="jc-stack" style={{ marginTop: "var(--jc-space-6)" }}>
+                  <p className="jc-label">Allocation</p>
+                  {topHoldings.map((h) => (
+                    <div key={h.symbol} className="jc-alloc-row">
+                      <span className="jc-alloc-label">{h.symbol}</span>
+                      <span className="jc-alloc-bar" aria-hidden="true">
+                        <span className="jc-alloc-fill" style={{ width: `${allocationBarWidth(h.allocationPercent)}%` }} />
+                      </span>
+                      <span className="jc-alloc-value jc-numeric">{allocationLabel(h.allocationPercent)}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
+              <p className="jc-caption" style={{ marginTop: "var(--jc-space-5)" }}>
+                Valuation uses demo market data on this deployment. It is an estimate for display only — your balances
+                are exact and held in the ledger.
+              </p>
+            </>
+          ) : portfolio.hasFunds ? (
+            <div className="jc-stack">
+              <p className="jc-sm">You hold balances, but no price source is connected to value them in a single currency.</p>
+              <LinkButton href="/assets" variant="tertiary" size="sm">
+                View balances
+              </LinkButton>
             </div>
           ) : (
-            <div className="jc-stat-pair">
-              {/* A dash, not 0.00. A zero is a claim about a balance; a dash is
-                  the absence of one, which is what an empty account actually is
-                  before any asset has ever been held. */}
-              <Stat label="Available" value={null} pending />
-              <Stat label="Locked" value={null} pending />
-            </div>
+            <EmptyState
+              title="No assets yet"
+              description="Deposit crypto or make your first exchange and your balances will appear here."
+            />
           )}
-
-          <p className="jc-caption" style={{ marginTop: "var(--jc-space-5)" }}>
-            Total portfolio value needs a price feed to convert between assets. None is connected
-            on this deployment, so no total is shown.
-          </p>
         </CardContent>
       </Card>
 
-      {/* -------------------------------------------------------- quick actions */}
+      {/* ---------------------------------------------------------- quick actions */}
       <div className="jc-grid jc-grid-2">
-        {[
-          { label: "Deposit", href: "/wallets", available: false, body: "No crypto or fiat provider is connected." },
-          { label: "Withdraw", href: "/wallets", available: false, body: "No payout provider is connected." },
-          { label: "Exchange", href: "/exchange", available: true, body: "Convert between assets at a quoted rate." },
-          { label: "Trade", href: "/trade", available: true, body: "Place market and limit orders." },
-        ].map((action) => (
-          <Card key={action.label} variant={action.available ? "interactive" : "default"}>
+        {QUICK_ACTIONS.map((action) => (
+          <Card key={action.label} variant="interactive">
             <CardContent>
               <div className="jc-row-between" style={{ alignItems: "flex-start" }}>
                 <div>
@@ -184,13 +209,8 @@ export default async function DashboardPage() {
                     {action.body}
                   </p>
                 </div>
-                <LinkButton
-                  href={action.href}
-                  variant="tertiary"
-                  size="sm"
-                  disabled={!action.available}
-                >
-                  {action.available ? "Open" : "Unavailable"}
+                <LinkButton href={action.href} variant="tertiary" size="sm">
+                  Open
                 </LinkButton>
               </div>
             </CardContent>
@@ -198,13 +218,29 @@ export default async function DashboardPage() {
         ))}
       </div>
 
-      {/* --------------------------------------------------------- transactions */}
+      {/* ------------------------------------------------------------ recent orders */}
       <Card>
-        <CardHeader title="Recent activity" as="h2" />
-        <EmptyState
-          title="No transactions yet"
-          description="Deposits, exchanges, trades and withdrawals will appear here once providers are connected and your first operation settles."
+        <CardHeader
+          title="Recent orders"
+          as="h2"
+          action={
+            <LinkButton href="/orders" variant="ghost" size="sm">
+              View all
+            </LinkButton>
+          }
         />
+        <OrdersTable
+          rows={recentOrders}
+          caption="Your five most recent orders"
+          emptyTitle="No orders yet"
+          emptyDescription="Place a limit order on the Trade screen and it will appear here."
+        />
+      </Card>
+
+      {/* ------------------------------------------------------------ recent trades */}
+      <Card>
+        <CardHeader title="Recent trades" as="h2" />
+        <TradesTable rows={recentTrades} caption="Your five most recent trades" />
       </Card>
 
       {/* --------------------------------------------------------- verification */}
@@ -218,9 +254,12 @@ export default async function DashboardPage() {
                 <KycStatus status={viewer.profile.kyc_status} />
               </div>
               <p className="jc-caption">
-                Verification is requested when an operation requires it. Risk and compliance rules
-                may ask for it before a tier&rsquo;s limit is reached.
+                Verification is requested when an operation requires it. Risk and compliance rules may ask for it before
+                a tier&rsquo;s limit is reached.
               </p>
+              <LinkButton href="/account/verification" variant="tertiary" size="sm">
+                View verification
+              </LinkButton>
             </div>
           </CardContent>
         </Card>
@@ -235,12 +274,7 @@ export default async function DashboardPage() {
 
       {/* --------------------------------------------------------------- limits */}
       <Card>
-        <CardHeader
-          title="Your limits"
-          subtitle="Checked on the server for every operation"
-          as="h2"
-        />
-
+        <CardHeader title="Your limits" subtitle="Checked on the server for every operation" as="h2" />
         <Table caption="Limits for your account tier, by operation and window">
           <thead>
             <tr>
@@ -259,19 +293,13 @@ export default async function DashboardPage() {
                 <tr key={`${limit.operation}-${limit.window_kind}`}>
                   <Td>{OPERATION_LABEL[limit.operation] ?? limit.operation}</Td>
                   <Td>
-                    <span className="jc-muted">
-                      {WINDOW_LABEL[limit.window_kind] ?? limit.window_kind}
-                    </span>
+                    <span className="jc-muted">{WINDOW_LABEL[limit.window_kind] ?? limit.window_kind}</span>
                   </Td>
                   <Td numeric>
                     {limit.max === null ? (
                       <span className="jc-muted">By arrangement</span>
                     ) : (
-                      <CurrencyAmount
-                        value={limit.max}
-                        symbol={limit.quote_currency}
-                        decimals={0}
-                      />
+                      <CurrencyAmount value={limit.max} symbol={limit.quote_currency} decimals={0} />
                     )}
                   </Td>
                 </tr>
@@ -279,14 +307,14 @@ export default async function DashboardPage() {
             )}
           </tbody>
         </Table>
-
         <CardContent>
           <p className="jc-caption">
-            These are upper bounds, not entitlements. An operation can still be declined or sent
-            for verification by risk and compliance rules below these figures.
+            These are upper bounds, not entitlements. An operation can still be declined or sent for verification by
+            risk and compliance rules below these figures.
           </p>
         </CardContent>
       </Card>
     </div>
   );
 }
+

@@ -150,7 +150,7 @@ const FUNCTIONS_019: Record<FunctionName, Executors> = {
   },
   ledger_post: {
     executors: ["service_role"],
-    calledFrom: `the only way to move a balance (004, 017; src/lib/db/money-write.ts moneyArgs("ledger_post")); ${NO_CALLER_YET}. release_withdrawal_hold calls it as its owner and needs no grant`,
+    calledFrom: `the only way to move a balance (004, 017; src/lib/db/money-write.ts moneyArgs("ledger_post")); ${NO_CALLER_YET}, only the operator CLI scripts/fund-demo-account.ts (development/preview demo funding, the target's service-role key). release_withdrawal_hold calls it as its owner and needs no grant`,
   },
   consume_quote: { executors: ["service_role"], calledFrom: `server swap execution (006, 017); ${NO_CALLER_YET}` },
   reconcile_wallets: { executors: ["service_role"], calledFrom: `server reconciliation (004, 016, 017); ${NO_CALLER_YET}` },
@@ -159,6 +159,9 @@ const FUNCTIONS_019: Record<FunctionName, Executors> = {
   expire_stale_quotes: { executors: ["service_role"], calledFrom: `scheduled quote expiry (006); ${NO_CALLER_YET}` },
   mark_trade_settled: { executors: ["service_role"], calledFrom: `trade settlement (005); ${NO_CALLER_YET}` },
   release_withdrawal_hold: { executors: ["service_role"], calledFrom: `failed-withdrawal release (007); ${NO_CALLER_YET}` },
+  place_limit_order: { executors: ["service_role"], calledFrom: "src/lib/engines/order-engine.ts placeLimitOrder() via the service-role client (018)" },
+  cancel_order: { executors: ["service_role"], calledFrom: "src/lib/engines/order-engine.ts cancelOrder() via the service-role client (018)" },
+  apply_fill: { executors: ["service_role"], calledFrom: `atomic fill settlement (020); ${NO_CALLER_YET} — the ExecutionService will call it once a concrete LP adapter exists` },
   // Both answer for auth.uid(); the service_role key carries no user, so for
   // service_role they always return false. No RLS policy calls them (checked by
   // check-privileges.ts), and requireAdmin() reads admin_users instead.
@@ -223,6 +226,9 @@ export const SECURITY_DEFINER_FUNCTIONS: readonly string[] = [
   "has_admin_role",
   "is_admin",
   "ledger_post",
+  "place_limit_order",
+  "cancel_order",
+  "apply_fill",
   "mark_trade_settled",
   "reconcile_wallets",
   "release_withdrawal_hold",

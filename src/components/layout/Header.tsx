@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { Logo } from "@/components/brand/Logo";
 import { LinkButton } from "@/components/ui/Button";
+import { brand } from "@/config/brand";
 
 import { ACCOUNT_NAV, PRIMARY_NAV } from "./nav-config";
 import { NavLink } from "./NavLink";
@@ -32,7 +33,7 @@ export function Header({
   return (
     <header className="jc-header">
       <div className="jc-container jc-header-inner">
-        <Link href={signedIn ? "/dashboard" : "/"} aria-label="JimoCex home">
+        <Link href={signedIn ? "/dashboard" : "/"} aria-label={`${brand.name} home`}>
           <Logo variant="compact" size={26} />
         </Link>
 

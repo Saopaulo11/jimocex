@@ -1,5 +1,8 @@
 import "server-only";
 
+import { product } from "@/config/brand";
+
+import { PrototypeMarketDataProvider } from "./prototype";
 import { UnavailableMarketDataProvider } from "./unavailable";
 import type { MarketDataProvider } from "./types";
 
@@ -10,20 +13,31 @@ import type { MarketDataProvider } from "./types";
  * `JIMOCEX_MARKET_DATA_PROVIDER`. Nothing in a component, a page or an engine
  * changes.
  *
- * The default is deliberately the provider that refuses. A deployment with no
- * feed configured shows "unavailable" everywhere it would show a price, which
- * is the truth; silently selecting a demo source would put invented numbers on
- * a production screen.
+ * Selection, in order:
+ *   1. `JIMOCEX_MARKET_DATA_PROVIDER` — an explicit choice always wins, so a
+ *      deployment with a real feed names it and a client can force "unavailable".
+ *   2. otherwise `product.demoMarketData` (brand config): the prototype demo
+ *      source when true, the refusing provider when false.
+ *
+ * Note the ordering of the fallback: the demo source is opt-in through brand
+ * config, and the honest "unavailable" provider is what a client gets the
+ * moment they turn the demo off WITHOUT naming a real feed. An unknown
+ * environment name also falls back to refusing rather than to a working-looking
+ * provider: a typo must not quietly change what numbers the platform shows.
+ * The demo source is never "live" — its `kind` is "demo", so every surface
+ * labels it, and no screen can pass a demo price off as a market one.
  */
 
 const registry = new Map<string, () => MarketDataProvider>([
   ["unavailable", () => new UnavailableMarketDataProvider()],
+  ["prototype", () => new PrototypeMarketDataProvider()],
 ]);
 
 const instances = new Map<string, MarketDataProvider>();
 
 export function getMarketDataProvider(): MarketDataProvider {
-  const name = process.env.JIMOCEX_MARKET_DATA_PROVIDER ?? "unavailable";
+  const configured = process.env.JIMOCEX_MARKET_DATA_PROVIDER;
+  const name = configured ?? (product.demoMarketData ? "prototype" : "unavailable");
 
   const cached = instances.get(name);
   if (cached) return cached;

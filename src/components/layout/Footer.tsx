@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { Logo } from "@/components/brand/Logo";
+import { brand } from "@/config/brand";
 
 import { FOOTER_NAV } from "./nav-config";
 
@@ -49,7 +50,7 @@ export function Footer() {
         </div>
 
         <div className="jc-footer-bottom">
-          <p className="jc-caption">© {year} JimoCex. All rights reserved.</p>
+          <p className="jc-caption">© {year} {brand.companyName}. All rights reserved.</p>
           <p className="jc-caption" style={{ maxWidth: "62ch" }}>
             Trading digital assets and currency markets carries risk, including the possible loss of
             the amount invested. Nothing on this site is investment advice.

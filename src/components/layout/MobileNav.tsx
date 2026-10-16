@@ -36,6 +36,18 @@ const ICONS: Record<string, React.ReactNode> = {
       <path d="M13 10.5h2.5" strokeLinecap="round" />
     </svg>
   ),
+  "/orders": (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M6 4h8a1 1 0 0 1 1 1v11l-2-1.3-1.5 1-1.5-1-1.5 1L7 15.7 5 17V5a1 1 0 0 1 1-1Z" />
+      <path d="M8 8h4M8 11h4" />
+    </svg>
+  ),
+  "/account": (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="10" cy="7" r="3" />
+      <path d="M4 16.5a6 6 0 0 1 12 0" />
+    </svg>
+  ),
 };
 
 export function MobileNav() {

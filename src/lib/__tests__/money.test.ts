@@ -13,6 +13,7 @@ import {
   fromDatabase,
   fromDatabaseNullable,
   greaterThan,
+  hasAtMostDecimals,
   isNegative,
   isPositive,
   isZero,
@@ -498,6 +499,25 @@ describe("formatMoney validates its options", () => {
 
   test("a negative value that truncates to zero shows no sign", () => {
     assert.equal(formatMoney(parseMoney("-0.001"), { decimals: 2, minDecimals: 2 }), "0.00");
+  });
+});
+
+describe("hasAtMostDecimals", () => {
+  test("accepts a value within the precision", () => {
+    assert.equal(hasAtMostDecimals(parseMoney("60000.00"), 2), true);
+    assert.equal(hasAtMostDecimals(parseMoney("0.5"), 8), true);
+    assert.equal(hasAtMostDecimals(parseMoney("100"), 0), true);
+  });
+  test("rejects a value finer than the precision", () => {
+    assert.equal(hasAtMostDecimals(parseMoney("60000.001"), 2), false);
+    assert.equal(hasAtMostDecimals(parseMoney("0.000000001"), 8), false);
+  });
+  test("handles a negative value by magnitude", () => {
+    assert.equal(hasAtMostDecimals(parseMoney("-1.25"), 2), true);
+    assert.equal(hasAtMostDecimals(parseMoney("-1.253"), 2), false);
+  });
+  test("rejects an out-of-range places argument", () => {
+    assert.throws(() => hasAtMostDecimals(parseMoney("1"), 19), RangeError);
   });
 });
 

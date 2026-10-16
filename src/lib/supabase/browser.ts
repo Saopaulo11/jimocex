@@ -36,7 +36,7 @@ function requireEnv(name: "NEXT_PUBLIC_SUPABASE_URL" | "NEXT_PUBLIC_SUPABASE_ANO
 
   if (!value) {
     throw new Error(
-      `${name} is not set. Copy .env.example to .env and fill in the JimoCex Supabase project's values.`,
+      `${name} is not set. Copy .env.example to .env and fill in your Supabase project's values.`,
     );
   }
   return value;

@@ -5,4 +5,14 @@ export { Header } from "./Header";
 export { Footer } from "./Footer";
 export { MobileNav } from "./MobileNav";
 export { NavLink } from "./NavLink";
-export { ACCOUNT_NAV, FOOTER_NAV, MOBILE_NAV, PRIMARY_NAV, type NavItem } from "./nav-config";
+export { Sidebar } from "./Sidebar";
+export {
+  ACCOUNT_NAV,
+  ADMIN_SIDEBAR,
+  APP_SIDEBAR,
+  FOOTER_NAV,
+  MOBILE_NAV,
+  PRIMARY_NAV,
+  type NavItem,
+  type NavSection,
+} from "./nav-config";

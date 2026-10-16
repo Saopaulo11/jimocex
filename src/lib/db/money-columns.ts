@@ -206,6 +206,22 @@ export const DB_FUNCTIONS = {
     nullableResult: ["wallet_available", "wallet_locked"],
   },
   limit_usage_total: { args: [], result: [], scalarResult: true, executors: ["service_role"] },
+  place_limit_order: {
+    // Money INPUTS only; it returns the new order's id (a scalar), so there is
+    // no money result column to track.
+    args: ["p_price", "p_amount", "p_lock_amount", "p_fee"],
+    result: [],
+    jsonArgs: ["p_metadata"],
+    executors: ["service_role"],
+  },
+  cancel_order: SERVER_ONLY,
+  apply_fill: {
+    // Money INPUTS only; it returns the settled trade's id (a scalar), so there
+    // is no money result column. p_fee_asset_id/p_executed_at are not money.
+    args: ["p_base_amount", "p_quote_amount", "p_execution_price", "p_fee_amount"],
+    result: [],
+    executors: ["service_role"],
+  },
   claim_deposit_for_credit: SERVER_ONLY,
   claim_provider_event: SERVER_ONLY,
   expire_stale_quotes: SERVER_ONLY,

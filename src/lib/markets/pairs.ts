@@ -1,6 +1,7 @@
 import "server-only";
 
 import { getMarketDataProvider } from "@/lib/providers/market-data";
+import { product } from "@/config/brand";
 import { moneySelect } from "@/lib/db/money-columns";
 import { fromDatabase, toDecimalString } from "@/lib/money";
 import { createClient } from "@/lib/supabase/server";
@@ -85,7 +86,15 @@ export async function listMarkets(): Promise<MarketsResult> {
       ];
     });
 
-    return { markets, configured: true, pricesAvailable };
+    // Brand/product VISIBILITY filter only. `trading_pairs.trading_enabled`
+    // remains the authority on whether a pair can actually be traded; an
+    // allow-list here just controls what the UI surfaces (default: all).
+    const visible =
+      product.enabledMarkets === "all"
+        ? markets
+        : markets.filter((market) => product.enabledMarkets.includes(market.symbol));
+
+    return { markets: visible, configured: true, pricesAvailable };
   } catch {
     // No Supabase configuration in this environment. The page still renders and
     // says the listing is unavailable, rather than failing the request.

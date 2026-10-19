@@ -130,11 +130,49 @@ through the real UI (`preview-environment.md`, Evidence, Slice 10).
 - **labelled** — its `kind` is `"demo"`, and `PriceSourceNote` / page banners say
   "Demo data" wherever it appears. It is never presented as a live feed.
 
-Selection (registry `src/lib/providers/market-data/index.ts`): the env var
-`JIMOCEX_MARKET_DATA_PROVIDER` wins if set; otherwise `product.demoMarketData`
-(brand config) picks `"prototype"` when true and the refusing `"unavailable"`
-provider when false. A real deployment sets `demoMarketData: false` and names a
-real adapter.
+Selection (registry `src/lib/providers/market-data/index.ts`, rules in
+`selection.ts`): the env var `JIMOCEX_MARKET_DATA_PROVIDER` wins if set
+(`"binance"`, `"prototype"` or `"unavailable"`; an unknown name is
+`"unavailable"`); otherwise `product.demoMarketData` (brand config) picks
+`"prototype"` when true and the public `"binance"` market data when false — the
+default since Slice 13A. The demo source is only ever used when chosen.
+
+## Public market data (Slice 13A)
+
+`src/lib/providers/market-data/binance.ts` is a real adapter behind the same
+`MarketDataProvider` seam (`kind: "live"`). It reads Binance's public,
+read-only market-data host `https://data-api.binance.vision` — no key, no
+account, GET only:
+
+| Figure | Endpoint |
+| --- | --- |
+| last price, 24h change and %, high, low, volume, bid, ask | `/api/v3/ticker/24hr` |
+| candles (the terminal and pair pages use `1d`) | `/api/v3/klines` |
+| order book (snapshot, display only) | `/api/v3/depth` |
+| recent public trades (not shown yet) | `/api/v3/trades` |
+
+- **Pairs.** Only `BTC-USDT → BTCUSDT`, `ETH-USDT → ETHUSDT`,
+  `SOL-USDT → SOLUSDT` are mapped. Every other pair shows a dash and
+  "not covered" — never a synthesised or demo price. The LimitEngine's
+  `<base>-USD` valuation of those three answers with the USDT pair's price
+  (1 USDT taken as 1 USD, as the portfolio valuation already does).
+- **Honest failure.** Timeout (5 s), HTTP error, rate limit (418/429, then a
+  cool-down per `Retry-After`), access refused (403/451, then 5 min),
+  malformed or unexpected body: the section shows "unavailable". Nothing falls
+  back to the prototype source or to a stale figure, and the LimitEngine
+  refuses an order it cannot value.
+- **Exact and bounded.** Every price and quantity arrives as a JSON string and
+  is checked with `asDecimalString()`; a JSON number in a money field is
+  refused. At most 500 candles, 50 book levels, 100 trades, 1 MB per response.
+- **Caching.** A per-instance cache (ticker 10 s, book 5 s, candles 60 s,
+  failures 5 s) merges concurrent identical requests. The trading terminal
+  refreshes every 15 s while its tab is visible, through the read-only
+  `GET /api/market-data/terminal?pair=…`; a failed refresh clears the figures
+  rather than leaving stale ones. Polled REST data is labelled "Market data",
+  never "live" or real-time.
+- **Display only.** The order engine, fees, reserves, the ledger and settlement
+  never read it; the book is not liquidity, and no price moves or fills an
+  order. Execution stays the separate, unconnected `@/lib/execution` seam.
 
 ## Connecting real providers
 

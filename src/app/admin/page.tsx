@@ -2,11 +2,11 @@ import type { Metadata } from "next";
 
 import { Badge, Card, CardContent, CardHeader, LinkButton } from "@/components/ui";
 import { getAdminStats } from "@/lib/admin/reads";
+import { marketDataStatus } from "@/lib/markets/ticker";
 
 export const metadata: Metadata = { title: "Operator · Dashboard" };
 
 const PROVIDERS = [
-  { name: "Market data", status: "Demo data", tone: "warning" as const },
   { name: "Liquidity / execution", status: "Not connected", tone: "neutral" as const },
   { name: "Custody", status: "Not connected", tone: "neutral" as const },
   { name: "Payments / fiat", status: "Not connected", tone: "neutral" as const },
@@ -16,6 +16,8 @@ const PROVIDERS = [
 
 export default async function AdminDashboardPage() {
   const stats = await getAdminStats();
+  const marketData = marketDataStatus();
+  const providers = [{ name: "Market data", status: marketData.status, tone: marketData.tone }, ...PROVIDERS];
 
   const metrics = [
     { label: "Users", value: stats.users },
@@ -70,7 +72,7 @@ export default async function AdminDashboardPage() {
         <CardHeader title="Provider status" subtitle="External integrations the client connects" as="h2" />
         <CardContent>
           <div className="jc-summary">
-            {PROVIDERS.map((p) => (
+            {providers.map((p) => (
               <div key={p.name} className="jc-summary-row">
                 <span className="jc-summary-key">{p.name}</span>
                 <span className="jc-summary-val">

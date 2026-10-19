@@ -1,11 +1,11 @@
 import type { Metadata } from "next";
 
 import { Badge, Card, CardContent, CardHeader, type BadgeTone } from "@/components/ui";
+import { marketDataStatus } from "@/lib/markets/ticker";
 
 export const metadata: Metadata = { title: "Operator · System" };
 
 const PROVIDERS: { name: string; status: string; tone: BadgeTone }[] = [
-  { name: "Market data", status: "Demo data", tone: "warning" },
   { name: "Liquidity / execution", status: "Not connected", tone: "neutral" },
   { name: "Custody", status: "Not connected", tone: "neutral" },
   { name: "Payments / fiat", status: "Not connected", tone: "neutral" },
@@ -20,6 +20,8 @@ const ENVIRONMENT: { key: string; value: string }[] = [
 ];
 
 export default function AdminSystemPage() {
+  const marketData = marketDataStatus();
+  const providers = [{ name: "Market data", status: marketData.status, tone: marketData.tone }, ...PROVIDERS];
   return (
     <div className="jc-container jc-stack-lg">
       <header>
@@ -79,7 +81,7 @@ export default function AdminSystemPage() {
         <CardHeader title="Provider status" subtitle="External integrations the client connects" as="h2" />
         <CardContent>
           <div className="jc-summary">
-            {PROVIDERS.map((p) => (
+            {providers.map((p) => (
               <div key={p.name} className="jc-summary-row">
                 <span className="jc-summary-key">{p.name}</span>
                 <span className="jc-summary-val">

@@ -4,6 +4,7 @@ import { PublicShell } from "@/components/layout";
 import { Badge, Card, CardContent, CardHeader, type BadgeTone } from "@/components/ui";
 import { brand } from "@/config/brand";
 import { getViewer } from "@/lib/auth/session";
+import { marketDataStatus } from "@/lib/markets/ticker";
 
 export const metadata: Metadata = {
   title: "System status",
@@ -17,12 +18,8 @@ const COMPONENTS: { name: string; status: string; tone: BadgeTone; note: string 
     tone: "success",
     note: "The application, accounts and ledger are running normally.",
   },
-  {
-    name: "Market data",
-    status: "Demo data",
-    tone: "warning",
-    note: "No real market-data feed is connected. Prices shown are deterministic demo values, labelled as such.",
-  },
+  // Market data is filled in at render time from the selected provider (marketDataStatus()).
+  { name: "Market data", status: "", tone: "neutral", note: "" },
   {
     name: "Trading engine",
     status: "Awaiting provider",
@@ -51,6 +48,12 @@ const COMPONENTS: { name: string; status: string; tone: BadgeTone; note: string 
 
 export default async function StatusPage() {
   const viewer = await getViewer();
+  const marketData = marketDataStatus();
+  const components = COMPONENTS.map((component) =>
+    component.name === "Market data"
+      ? { ...component, status: marketData.status, tone: marketData.tone, note: marketData.note }
+      : component,
+  );
 
   return (
     <PublicShell signedIn={Boolean(viewer)}>
@@ -70,7 +73,7 @@ export default async function StatusPage() {
           <CardHeader title="Components" />
           <CardContent>
             <div className="jc-stack-lg">
-              {COMPONENTS.map((component) => (
+              {components.map((component) => (
                 <div key={component.name}>
                   <div className="jc-row" style={{ gap: "var(--jc-space-3)", alignItems: "center" }}>
                     <h3 className="jc-h5">{component.name}</h3>

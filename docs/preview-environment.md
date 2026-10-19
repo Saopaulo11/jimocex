@@ -42,7 +42,7 @@ Every read of `process.env` in `src/` (Phase 2.2 search, refreshed in Slice 10; 
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | `server.ts:26`, `browser.ts:35`, `proxy.ts:51` | the same. Holds the project's public client key (step 8) |
 | `SUPABASE_SERVICE_ROLE_KEY` | `src/lib/supabase/admin.ts:28` only | `createAdminClient()` throws when called: placing, previewing and cancelling an order, the limit check, a withdrawal request and the admin pages then fail with a generic error. See below |
 | `NEXT_PUBLIC_APP_URL` | `src/app/auth/actions.ts:27` (origin of email links), `src/app/layout.tsx:12` (`metadataBase`) | email links use the request's `x-forwarded-host`, then `host`; `metadataBase` stays unset. What that relies on: step 6 |
-| `JIMOCEX_MARKET_DATA_PROVIDER` | `src/lib/providers/market-data/index.ts:39` | the brand config decides (`product.demoMarketData`: the labelled demo source when true, `"unavailable"` when false); an unknown name falls back to `"unavailable"` |
+| `JIMOCEX_MARKET_DATA_PROVIDER` | `src/lib/providers/market-data/index.ts`, rules in `selection.ts` | the brand config decides (`product.demoMarketData`: the labelled demo source when true; the public `"binance"` market data when false, the default since Slice 13A); an unknown name falls back to `"unavailable"` |
 | `JIMOCEX_EXECUTION_PROVIDER` | `src/lib/execution/index.ts:33` | `"unavailable"`: no venue; a LIMIT order rests OPEN and never fills. Leave it unset |
 
 `NEXT_PUBLIC_*` values are inlined at build time. They must be set before the Preview is built.

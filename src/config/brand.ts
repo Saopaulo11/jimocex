@@ -77,13 +77,15 @@ export type Product = {
   /** Whether the Exchange (swap) product is offered in the UI. */
   enabledExchange: boolean;
   /**
-   * Whether to show DETERMINISTIC DEMO market data when no real feed is named.
+   * An explicit opt-in to DETERMINISTIC DEMO market data when
+   * `JIMOCEX_MARKET_DATA_PROVIDER` names no provider.
    *
    * Presentation only, and never a security control: it changes what numbers
    * the UI displays, nothing a customer can transact against. The demo source
-   * is labelled "Demo data" wherever it appears. A real deployment sets this
-   * `false` (and names a real feed in `JIMOCEX_MARKET_DATA_PROVIDER`); leaving
-   * it `false` with no feed named shows an honest "unavailable" everywhere.
+   * is labelled "Demo data" wherever it appears. `false` (the default) uses the
+   * public, read-only market data (`binance`) unless the environment names
+   * another provider; `JIMOCEX_MARKET_DATA_PROVIDER=unavailable` shows an
+   * honest "unavailable" everywhere instead.
    */
   demoMarketData: boolean;
 };
@@ -129,10 +131,10 @@ export const product: Product = {
   // market orders as unavailable; the engine refuses them either way.
   enabledMarketOrders: false,
   enabledExchange: true,
-  // On for this prototype: show deterministic demo prices (labelled "Demo
-  // data") so every surface is alive. A real deployment sets this false and
-  // names a real feed in JIMOCEX_MARKET_DATA_PROVIDER. Presentation only.
-  demoMarketData: true,
+  // Off: prices come from public market data (display only — execution is a
+  // separate, unconnected provider). Demo prices are an explicit choice: set
+  // this true, or JIMOCEX_MARKET_DATA_PROVIDER=prototype. Presentation only.
+  demoMarketData: false,
 };
 
 /** The accessible / plain brand name, whatever shape the wordmark takes. */

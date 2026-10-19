@@ -34,6 +34,10 @@ export class UnavailableMarketDataProvider implements MarketDataProvider {
     return false;
   }
 
+  supportsPair(_pair: string): boolean {
+    return false;
+  }
+
   private refuse(): never {
     throw new AppError(
       "MARKET_DATA_UNAVAILABLE",

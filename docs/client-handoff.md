@@ -106,10 +106,13 @@ distinct integration tasks.
 ## Known limitations at handoff
 
 - Market orders are not executable (no venue); shown as unavailable.
-- No live price feed. With `product.demoMarketData` on (the default), prices,
-  charts and the order book show deterministic demo data, labelled "Demo data"
-  wherever it appears; with it off they show as unavailable. Neither is a live
-  market.
+- Market data is public, read-only display data (`JIMOCEX_MARKET_DATA_PROVIDER`,
+  default `binance`: BTC-USDT, ETH-USDT, SOL-USDT only), polled — not a
+  streamed or licensed feed, and not an executable quote. Other pairs show no
+  price. If the source cannot be reached from the deployment's region, prices
+  show as unavailable and the limit check refuses orders. The labelled demo
+  source (`prototype`) remains for explicit local/demo use. Whether the public
+  source's terms suit a client's production use is the client's decision.
 - A resting LIMIT order does not fill until an execution provider is connected.
 - The end-to-end app↔Supabase trading flow should be verified in the client's
   own connected environment; it is not exercised against a hosted database here.

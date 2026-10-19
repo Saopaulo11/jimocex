@@ -73,7 +73,7 @@ export default async function AssetDetailPage({ params }: { params: Promise<{ sy
             <Stat
               label="Total"
               value={<CurrencyAmount value={parseMoney(holding?.total ?? "0")} symbol={symbol} decimals={asset.decimals} size="md" />}
-              hint={holding?.valueUsd ? `≈ ${holding.valueUsd} USD (demo)` : undefined}
+              hint={holding?.valueUsd ? `≈ ${holding.valueUsd} USD (${portfolio.demo ? "demo" : "estimate"})` : undefined}
             />
           </div>
 

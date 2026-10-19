@@ -177,8 +177,10 @@ export default async function DashboardPage() {
               ) : null}
 
               <p className="jc-caption" style={{ marginTop: "var(--jc-space-5)" }}>
-                Valuation uses demo market data on this deployment. It is an estimate for display only — your balances
-                are exact and held in the ledger.
+                {portfolio.demo
+                  ? "Valuation uses demo market data on this deployment."
+                  : "Valuation uses public market data, refreshed periodically."}{" "}
+                It is an estimate for display only — your balances are exact and held in the ledger.
               </p>
             </>
           ) : portfolio.hasFunds ? (

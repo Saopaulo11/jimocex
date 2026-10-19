@@ -12,6 +12,18 @@ import type { OpenOrderView, PairBalance } from "@/lib/trade/types";
 
 import { OpenOrders } from "./OpenOrders";
 import { OrderForm } from "./OrderForm";
+import { useTerminalMarketData } from "./useTerminalMarketData";
+
+/** Why a market-data section has nothing to show — honest, never an estimate. */
+function unavailableReason(market: TerminalMarketData, what: string): string {
+  if (market.kind === "unavailable") {
+    return `No market data provider is connected, so no ${what} is available for this pair.`;
+  }
+  if (!market.pairSupported) {
+    return `The market data source does not cover this pair, so no ${what} is shown. Nothing is estimated in its place.`;
+  }
+  return "Market data is temporarily unavailable. Nothing is estimated in its place.";
+}
 
 /**
  * Trading terminal (spec §31).
@@ -23,15 +35,17 @@ import { OrderForm } from "./OrderForm";
  * is `trading_pairs.trading_enabled` in the database (the demo set is BTC-USDT,
  * ETH-USDT, SOL-USDT); every other pair is shown as view only.
  *
- * The price, chart and order book are DEMO data from the prototype market-data
- * source (the same source the Markets pages use), labelled "Demo data" so a
- * demo figure is never mistaken for a live one. When no source is connected they
- * fall back to honest unavailable states.
+ * The price, chart and order book come from the selected market-data source (the
+ * same one the Markets pages use): public market data, labelled "Market data"
+ * and refreshed periodically while the page is open, or — only when explicitly
+ * chosen — the prototype source, labelled "Demo data". They are information, not
+ * an executable market: the book is not liquidity and no price moves an order.
+ * When a source has nothing for a section it shows an honest unavailable state.
  */
 export function TradeTerminal({
   markets,
   selected,
-  market,
+  market: initialMarket,
   signedIn,
   verified,
   balances,
@@ -46,6 +60,7 @@ export function TradeTerminal({
   openOrders: OpenOrderView[];
 }) {
   const [query, setQuery] = useState("");
+  const market = useTerminalMarketData(initialMarket);
 
   const filtered = markets.filter((m) => m.symbol.includes(query.trim().toUpperCase()));
 
@@ -166,23 +181,28 @@ export function TradeTerminal({
                   )}
                 </span>
               </span>
-              <PriceSourceNote demo={market.demo} available={market.available} />
+              <PriceSourceNote demo={market.demo} available={market.available && ticker !== null} />
+              {!market.demo && market.asOf ? (
+                <span className="jc-caption">Updated {market.asOf.slice(11, 19)} UTC</span>
+              ) : null}
             </div>
           </div>
 
           <div style={{ minHeight: 320, display: "grid", placeItems: "center", padding: "var(--jc-space-4)" }}>
             {market.available && market.chartCloses.length > 1 ? (
               <div style={{ width: "100%" }}>
-                <PriceChart closes={market.chartCloses} />
+                <PriceChart
+                  closes={market.chartCloses}
+                  label={market.demo ? "Price chart (demo data)" : "Price chart (market data)"}
+                />
                 <p className="jc-caption" style={{ marginTop: "var(--jc-space-3)", textAlign: "center" }}>
-                  Demo data — a deterministic daily series for demonstration, not a live market.
+                  {market.demo
+                    ? "Demo data — a deterministic daily series for demonstration, not a live market."
+                    : "Market data — daily candles, refreshed periodically. For information only; not an executable quote."}
                 </p>
               </div>
             ) : (
-              <ProviderUnavailable
-                what="Price chart"
-                description="No market data provider is connected, so no candles are available for this pair."
-              />
+              <ProviderUnavailable what="Price chart" description={unavailableReason(market, "chart")} />
             )}
           </div>
         </section>
@@ -191,9 +211,7 @@ export function TradeTerminal({
         <section className="jc-panel jc-terminal-book" aria-label="Order book">
           <div className="jc-panel-head">
             <span className="jc-panel-title">Order book</span>
-            {market.demo && market.book ? (
-              <span className="jc-caption">Demo</span>
-            ) : null}
+            {market.book ? <span className="jc-caption">{market.demo ? "Demo" : "Market data · display only"}</span> : null}
           </div>
           {market.available && market.book ? (
             <div className="jc-book">
@@ -216,7 +234,7 @@ export function TradeTerminal({
             </div>
           ) : (
             <div style={{ minHeight: 180, display: "grid", placeItems: "center" }}>
-              <ProviderUnavailable what="Order book" />
+              <ProviderUnavailable what="Order book" description={unavailableReason(market, "order book")} />
             </div>
           )}
         </section>

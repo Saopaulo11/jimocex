@@ -100,10 +100,11 @@ export async function proxy(request: NextRequest) {
 export const config = {
   matcher: [
     /*
-     * Everything except static assets and image files. The session has to be
-     * refreshed on ordinary page requests; refreshing it for a favicon is pure
-     * latency.
+     * Everything except static assets, image files and the public market-data
+     * refresh. The session has to be refreshed on ordinary page requests;
+     * refreshing it for a favicon — or for a sessionless price poll every few
+     * seconds — is pure latency and Auth load.
      */
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|woff2?)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|api/market-data/|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|woff2?)$).*)",
   ],
 };

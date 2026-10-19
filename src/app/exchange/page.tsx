@@ -62,6 +62,11 @@ export default async function ExchangePage() {
                 Quotes use deterministic demo market data on this deployment, and no execution provider is connected —
                 so you can see a full quote, but an exchange cannot be executed. Fees are from the real fee schedule.
               </Alert>
+            ) : quoteAvailable ? (
+              <Alert tone="info" title="Indicative rates">
+                Quotes use public market data and are for information only. No execution provider is connected, so you
+                can see a full quote, but an exchange cannot be executed. Fees are from the real fee schedule.
+              </Alert>
             ) : null}
 
             <div

@@ -89,10 +89,16 @@ export default async function MarketPairPage({ params }: { params: Promise<{ pai
               </div>
 
               <div style={{ marginTop: "var(--jc-space-6)" }}>
-                {ticker.available ? <PriceChart closes={closes} /> : <div className="jc-chart-empty jc-muted">Price chart unavailable</div>}
-                {ticker.demo ? (
+                {candles.available && closes.length > 1 ? (
+                  <PriceChart closes={closes} label={candles.demo ? "Price chart (demo data)" : "Price chart (market data)"} />
+                ) : (
+                  <div className="jc-chart-empty jc-muted">Price chart unavailable</div>
+                )}
+                {candles.available ? (
                   <p className="jc-caption" style={{ marginTop: "var(--jc-space-3)" }}>
-                    Demo data — a deterministic daily series for demonstration, not a live market.
+                    {candles.demo
+                      ? "Demo data — a deterministic daily series for demonstration, not a live market."
+                      : "Market data — daily candles from a public source. For information only; not an executable quote."}
                   </p>
                 ) : null}
               </div>

@@ -27,6 +27,9 @@ export type Ticker = {
   high24h: DecimalString | null;
   low24h: DecimalString | null;
   volume24h: DecimalString | null;
+  /** Best bid / best ask at `asOf`, when the source reports them. Null when unknown. */
+  bid: DecimalString | null;
+  ask: DecimalString | null;
   /** When the upstream says this data is from — not when we fetched it. */
   asOf: Date;
   source: string;
@@ -67,7 +70,10 @@ export type CandleInterval = "1m" | "5m" | "15m" | "1h" | "4h" | "1d" | "1w";
  *   * "unavailable" — no source; every call refuses. Show "unavailable".
  *   * "demo"        — a deterministic PROTOTYPE source. The numbers are not a
  *                     market; every surface that shows them must say "Demo data".
- *   * "live"        — a real, connected market feed. (None ships in this repo.)
+ *   * "live"        — a real market feed (the public `binance` adapter ships in
+ *                     this repo). Its figures are real but informational: a
+ *                     surface labels them "Market data", never "live" or
+ *                     real-time, because they are polled, not streamed.
  */
 export type MarketDataKind = "unavailable" | "demo" | "live";
 
@@ -89,6 +95,12 @@ export interface MarketDataProvider {
   readonly kind: MarketDataKind;
   /** False when the adapter has no credentials or no upstream configured. */
   isConfigured(): boolean;
+  /**
+   * Whether this source covers the pair at all. False means "this source has
+   * nothing for the pair" (show "not covered"), as opposed to a call that failed
+   * just now (show "temporarily unavailable"). Answers without a network call.
+   */
+  supportsPair(pair: string): boolean;
 
   getTicker(pair: string): Promise<Ticker>;
   getTickers(pairs?: string[]): Promise<Ticker[]>;

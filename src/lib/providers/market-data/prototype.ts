@@ -196,6 +196,11 @@ export class PrototypeMarketDataProvider implements MarketDataProvider {
     return true;
   }
 
+  /** The demo source synthesises a stable figure for any pair it is asked about. */
+  supportsPair(_pair: string): boolean {
+    return true;
+  }
+
   async getTicker(pair: string): Promise<Ticker> {
     const cross = USD_VALUATION_CROSSES[pair];
     if (cross) return { ...this.tickerFor(cross, this.now()), pair };
@@ -294,6 +299,9 @@ export class PrototypeMarketDataProvider implements MarketDataProvider {
       high24h: toDecimalString(high),
       low24h: toDecimalString(low),
       volume24h: this.volumeFor(pair, today),
+      // The demo source quotes a single price; it does not invent a spread.
+      bid: null,
+      ask: null,
       asOf: at,
       source: SOURCE,
     };

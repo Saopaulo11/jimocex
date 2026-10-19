@@ -171,8 +171,8 @@ export function ExchangeWidget({
 
           {confirmed && !executionAvailable ? (
             <Alert tone="info" title="No exchange was performed">
-              This is a demo quote. No execution or liquidity provider is connected on this deployment, so the exchange
-              cannot be executed and nothing has moved.
+              {quote?.demo ? "This is a demo quote." : "This is an indicative quote from market data."} No execution or
+              liquidity provider is connected on this deployment, so the exchange cannot be executed and nothing has moved.
             </Alert>
           ) : null}
 

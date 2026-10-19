@@ -9,7 +9,14 @@
  * price displayed on the page comes from the exact decimal strings. So this is
  * not a money-in-float violation: it is geometry.
  */
-export function PriceChart({ closes }: { closes: string[] }) {
+export function PriceChart({
+  closes,
+  label = "Price chart",
+}: {
+  closes: string[];
+  /** Accessible name; say where the figures come from, e.g. "Price chart (market data)". */
+  label?: string;
+}) {
   if (closes.length < 2) {
     return (
       <div className="jc-chart-empty jc-muted" role="img" aria-label="No chart data">
@@ -45,7 +52,7 @@ export function PriceChart({ closes }: { closes: string[] }) {
   const gradientId = up ? "jc-chart-up" : "jc-chart-down";
 
   return (
-    <svg className="jc-chart" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label="Price chart (demo data)">
+    <svg className="jc-chart" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label={label}>
       <defs>
         <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor={stroke} stopOpacity="0.22" />

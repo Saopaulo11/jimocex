@@ -44,15 +44,23 @@ export default async function MarketsPage() {
 
         {!tickerData.available ? (
           <Alert tone="info" title="Market data is currently unavailable">
-            No price feed is connected on this deployment. Pair listings below are real platform configuration; prices,
-            changes and volumes are left blank rather than estimated.
+            {tickerData.kind === "live"
+              ? "The market-data source cannot be reached right now."
+              : "No price feed is connected on this deployment."}{" "}
+            Pair listings below are real platform configuration; prices, changes and volumes are left blank rather than
+            estimated.
           </Alert>
         ) : tickerData.demo ? (
           <Alert tone="warning" title="Demo market data">
             The pair listings are real platform configuration, but the prices, changes and volumes shown are
             deterministic demo data — not a live market feed. They update once a day and are for demonstration only.
           </Alert>
-        ) : null}
+        ) : (
+          <Alert tone="info" title="Market data">
+            Prices, changes and volumes come from a public market-data source and are refreshed periodically. They are
+            for information only — not executable quotes. A pair the source does not cover shows a dash.
+          </Alert>
+        )}
 
         <MarketsTable markets={markets} tickers={tickers} pricesAvailable={tickerData.available} />
       </div>

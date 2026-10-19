@@ -10,6 +10,7 @@ import type { TerminalMarketData } from "@/lib/markets/ticker";
 import type { Market } from "@/lib/markets/types";
 import type { OpenOrderView, PairBalance } from "@/lib/trade/types";
 
+import { referencePriceFor } from "./limit-price";
 import { OpenOrders } from "./OpenOrders";
 import { OrderForm } from "./OrderForm";
 import { useTerminalMarketData } from "./useTerminalMarketData";
@@ -41,6 +42,9 @@ function unavailableReason(market: TerminalMarketData, what: string): string {
  * chosen — the prototype source, labelled "Demo data". They are information, not
  * an executable market: the book is not liquidity and no price moves an order.
  * When a source has nothing for a section it shows an honest unavailable state.
+ * The order form's LIMIT Price starts from that same last price (public market
+ * data only — never demo or a pair the source does not cover); the customer can
+ * edit it, and the server re-validates whatever is submitted.
  */
 export function TradeTerminal({
   markets,
@@ -243,6 +247,8 @@ export function TradeTerminal({
         <section className="jc-panel jc-terminal-form" aria-label="Place an order">
           {selected ? (
             <OrderForm
+              // Another pair is another order: a fresh form, price and idempotency key.
+              key={selected.symbol}
               pair={{
                 symbol: selected.symbol,
                 base: selected.base,
@@ -256,6 +262,7 @@ export function TradeTerminal({
               verified={verified}
               baseBalance={baseBalance}
               quoteBalance={quoteBalance}
+              referencePrice={referencePriceFor(market, selected.symbol)}
             />
           ) : (
             <p className="jc-caption">No market is selected.</p>

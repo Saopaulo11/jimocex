@@ -173,6 +173,16 @@ account, GET only:
 - **Display only.** The order engine, fees, reserves, the ledger and settlement
   never read it; the book is not liquidity, and no price moves or fills an
   order. Execution stays the separate, unconnected `@/lib/execution` seam.
+- **Starting LIMIT price (Slice 13C).** The trade form's Price starts from the
+  same last price the terminal header shows (`src/app/trade/limit-price.ts`),
+  at the pair's `price_precision` (extra digits truncated), labelled "Filled
+  from the last market price — not an executable quote". It fills only an
+  empty field the customer has not edited: the 15 s refresh never replaces a
+  price already there, the Amount is never filled, and another pair opens a
+  fresh form. Public market data only — a pair the source does not cover, a
+  failing source, demo data or no provider leaves the field empty. The value
+  is submitted as the Price text like a typed one; the server re-validates it
+  and computes the order value, fee, reserve and limits itself.
 
 ## Connecting real providers
 

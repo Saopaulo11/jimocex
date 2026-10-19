@@ -51,6 +51,8 @@ const MARKET_DATA_MODULES = [
   path.join(SRC, "lib/markets/terminal.ts"),
   path.join(SRC, "app/api/market-data/terminal/route.ts"),
   path.join(SRC, "app/trade/useTerminalMarketData.ts"),
+  // Turns the market price into the order form's starting Price (Slice 13C).
+  path.join(SRC, "app/trade/limit-price.ts"),
 ];
 
 const WRITE_CAPABLE = /supabase|\/db\/|lib\/db|engines|settlement|execution|\/trade\/|ledger|wallets|orders|admin\/actions|money-write/;

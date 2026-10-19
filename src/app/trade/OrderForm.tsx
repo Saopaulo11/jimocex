@@ -11,6 +11,7 @@ import { lessThan, parseAmountInput, parseMoney, type AmountInputProblem } from 
 import type { OrderSideValue, OrderStatusValue, OrderTypeValue, PairBalance } from "@/lib/trade/types";
 
 import { placeLimitOrderAction, previewLimitOrderAction, type PreviewActionResult } from "./actions";
+import { limitPriceText, seedLimitPrice } from "./limit-price";
 
 /**
  * The live order form (spec §19, §31).
@@ -29,6 +30,13 @@ import { placeLimitOrderAction, previewLimitOrderAction, type PreviewActionResul
  * MARKET is shown but disabled: with no market-data and no execution provider,
  * an instant order cannot be priced or filled, and the form says so rather than
  * pretending otherwise.
+ *
+ * The LIMIT Price starts from `referencePrice` — the pair's last price from the
+ * public market-data source, the figure the terminal header shows — when there
+ * is one (`./limit-price`). It only fills an empty field the customer has not
+ * edited: a market-data refresh never replaces a price already there, and the
+ * Amount is never filled. The terminal keys this form by pair, so another pair
+ * starts a fresh form at that pair's price.
  */
 
 type PairView = {
@@ -73,18 +81,23 @@ export function OrderForm({
   verified,
   baseBalance,
   quoteBalance,
+  referencePrice,
 }: {
   pair: PairView;
   signedIn: boolean;
   verified: boolean;
   baseBalance: PairBalance | null;
   quoteBalance: PairBalance | null;
+  /** The pair's last market-data price (exact decimal string), or null when there is none. */
+  referencePrice: string | null;
 }) {
   const router = useRouter();
 
   const [side, setSide] = useState<OrderSideValue>("BUY");
   const [type, setType] = useState<OrderTypeValue>("LIMIT");
-  const [priceText, setPriceText] = useState("");
+  const [priceText, setPriceText] = useState(() => limitPriceText(referencePrice, pair.pricePrecision) ?? "");
+  // Set once the customer types in Price; from then on the field is theirs.
+  const [priceEdited, setPriceEdited] = useState(false);
   const [amountText, setAmountText] = useState("");
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [status, setStatus] = useState<Status>("idle");
@@ -94,6 +107,19 @@ export function OrderForm({
 
   // Minted lazily on first submit, reused across retries, cleared after success.
   const clientOrderIdRef = useRef<string | null>(null);
+
+  // A market price that arrives after the form opened (or after a placement
+  // cleared it) fills the empty, unedited Price field. Adjusted during render,
+  // not in an effect, so the field never paints empty and then jumps; it settles
+  // in one pass because a filled field is no longer seeded.
+  const seededPrice = seedLimitPrice({
+    edited: priceEdited,
+    current: priceText,
+    reference: referencePrice,
+    pricePrecision: pair.pricePrecision,
+  });
+  if (seededPrice !== null) setPriceText(seededPrice);
+  const priceFromMarket = !priceEdited && priceText !== "";
 
   const canTrade = signedIn && verified && pair.tradingEnabled;
   const submitting = status === "submitting";
@@ -208,7 +234,9 @@ export function OrderForm({
         reservedAsset: result.reservedAsset,
         reservedAmount: result.reservedAmount,
       });
+      // A fresh form: the Price starts again from the current market price, if any.
       setPriceText("");
+      setPriceEdited(false);
       setAmountText("");
       setPreview(null);
       // A placed order is done with its key; the next order needs a fresh one.
@@ -265,8 +293,14 @@ export function OrderForm({
             placeholder="0.00"
             inputMode="decimal"
             value={priceText}
-            onChange={(event) => setPriceText(event.target.value)}
+            onChange={(event) => {
+              setPriceText(event.target.value);
+              setPriceEdited(true);
+            }}
             assetSlot={<span className="jc-amount-asset">{quote}</span>}
+            secondary={
+              priceFromMarket ? "Filled from the last market price — not an executable quote. Edit it to set your limit." : undefined
+            }
             error={fieldErrors.price}
             disabled={!canTrade}
           />

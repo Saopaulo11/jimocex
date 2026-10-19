@@ -1347,6 +1347,19 @@ export type Database = {
         }
         Returns: string
       }
+      claim_order_for_submission: {
+        Args: { p_order_id: string; p_user_id: string }
+        Returns: string
+      }
+      finalize_venue_cancellation: {
+        Args: {
+          p_order_id: string
+          p_provider_order_id: string | null
+          p_venue_filled_amount: number
+          p_venue_status: string
+        }
+        Returns: string
+      }
       place_limit_order: {
         Args: {
           p_user_id: string
@@ -1394,6 +1407,10 @@ export type Database = {
         Returns: string
       }
       mark_trade_settled: { Args: { p_trade_id: string }; Returns: boolean }
+      record_provider_order_id: {
+        Args: { p_order_id: string; p_provider_order_id: string; p_user_id: string }
+        Returns: string
+      }
       reconcile_wallets: {
         Args: never
         Returns: {
@@ -1472,6 +1489,7 @@ export type Database = {
       order_status:
         | "PENDING"
         | "OPEN"
+        | "SUBMITTED"
         | "PARTIALLY_FILLED"
         | "FILLED"
         | "CANCELLED"
@@ -1689,6 +1707,7 @@ export const Constants = {
       order_status: [
         "PENDING",
         "OPEN",
+        "SUBMITTED",
         "PARTIALLY_FILLED",
         "FILLED",
         "CANCELLED",

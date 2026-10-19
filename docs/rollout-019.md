@@ -42,8 +42,10 @@ The two stages share the tools (`019_preflight.sql`, `02_money_catalog.sql`, `ch
 not the expected results. Between stages, a regular read-only drift check compares with the signature of
 the current stage: the 015 signature, then `PASS`, then `A2 A4 A5 H4`.
 
-**A new project is neither stage.** A new, empty project, such as the Preview test database, is
-installed from `supabase/migrations` (001–018, 020, 021), one file at a time. The procedure is in
+**A new project is neither stage.** A new, empty project is installed from `supabase/migrations`
+(001–018, 020–022), one file at a time. The Preview's existing test database, installed at 021 with
+demo data, is not reinstalled: it gets 022 only through the upgrade package of step 3b
+(`supabase/drafts/upgrade_021_022`), verified locally; the Preview itself remains at 021. The procedure is in
 `docs/preview-environment.md`, including the privileges the project must have before 001. Package v4 is
 never used there: it is built for the hosted 015 state only. 019 is not part of `supabase/migrations` on any project,
 and on a test project it also needs its own decision.
@@ -351,7 +353,7 @@ Every place the application reaches the database, in the working tree. `src/` is
 | `src/lib/supabase/database.types.ts` | describes 017, written by hand | compile time only | — | — |
 
 **What detects a mismatch:**
-- `test:db` and `test:db:019` build the schema from the repository (001–018, 020, 021). They check the code against that, never against the hosted 015.
+- `test:db` and `test:db:019` build the schema from the repository (001–018, 020–022). They check the code against that, never against the hosted 015.
 - The unit tests do not reach a database: `limit-rules.test.ts` covers the pure rules.
 - On hosted, `019_preflight.sql` check S1 reports a missing `limit_usage_total` (read-only).
 - At run time `checkEligibility` refuses instead of guessing.

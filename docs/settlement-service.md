@@ -60,7 +60,7 @@ a **generic** message — the raw PostgreSQL text is never surfaced:
 | SQLSTATE / shape | Code | retryable | reconcile |
 | --- | --- | --- | --- |
 | `23503` (unknown order) | `ORDER_NOT_FOUND` | no | yes |
-| `23001` (terminal order) | `ORDER_NOT_SETTLEABLE` | no | yes |
+| `23001` (terminal order; with 022 also an order never submitted to a venue) | `ORDER_NOT_SETTLEABLE` | no | yes |
 | `23514` + "exceeds order" | `OVER_FILL` | no | yes |
 | `23514` + fee message | `INVALID_FEE` | no | no |
 | `23514` + "is reserved" | `INSUFFICIENT_RESERVATION` | no | yes |
@@ -84,13 +84,45 @@ no second trade, no second ledger posting, no second `filled_amount` increment.
 Provider **event** de-duplication (`provider_events`) is a separate mechanism
 and is not conflated with the provider **trade** id.
 
-## Cumulative snapshots
+## Cumulative snapshots (Slice 14A)
 
-A venue that reports a cumulative filled amount is **not** a fill.
-`deriveFillDelta(cumulativeFilledBase, internalFilledBase)` computes the
-unsettled delta; only a positive delta becomes a discrete `ExecutionFill` (with
-its own `externalFillId`), minted by the adapter. The settlement service only
-ever settles one concrete fill. A non-positive delta is nothing to settle.
+A venue that reports running totals is **not** a fill. `settleSnapshot` reads the
+order's settled trades (persisted state — never a client value) and
+`deriveCumulativeFill` (`src/lib/settlement/fills.ts`) turns the snapshot into
+the one fill not yet settled:
+
+```
+delta = venue cumulative − settled cumulative      (base, quote, fee)
+id    = "cumulative:<venue order id>:<settled base the delta starts from>"
+```
+
+- **Exactly once.** The id is keyed on the *start* point. Each settled fill moves
+  the settled base on, so a start point settles at most once: a replayed
+  snapshot, or two snapshots derived concurrently from the same stale state,
+  carry the same id and `apply_fill` (UNIQUE `provider_trade_id`, row lock)
+  settles one and returns the other as the same trade. Example: 0.003 → 0.006 →
+  0.010 settles 0.003, 0.003, 0.004 under ids `…:0`, `…:0.003`, `…:0.006`.
+- **Refused:** a snapshot below what is settled (`STALE_SNAPSHOT` — never read as
+  zero), above the order amount (`OVER_FILL`), more base with no more quote or a
+  shrinking fee (`INVALID_FILL`), a new fill on a terminal order or on one
+  never submitted to a venue (`ORDER_NOT_SETTLEABLE`, Slice 14B). A replay adds
+  nothing (`NOTHING_NEW`).
+- **One mode per order.** The rule holds only if every fill of the order takes
+  this path. An adapter declares `fillReporting`; a discrete fill may not use the
+  reserved `cumulative:` prefix, and either path refuses an order that already
+  carries fills of the other kind.
+
+Discrete fills are pre-checked too (`checkDiscreteFill`: zero/negative base or
+quote, negative fee, side mismatch, terminal order, never-submitted order,
+over-fill) before `apply_fill`, which re-validates all of it atomically.
+
+**Only a submitted order settles (Slice 14B).** Migration 022 (written, applied
+nowhere) makes `apply_fill` refuse an order unless it is `SUBMITTED` or
+`PARTIALLY_FILLED` with a venue order id (`23001`). The service refuses the same
+earlier: `PENDING`/`OPEN` orders are `NOT_SUBMITTED`, reported as
+`ORDER_NOT_SETTLEABLE` with `reconcile: true`, and `apply_fill` is not called.
+A venue fill for an order JimoCex never sent is an incident, never a credit. The
+accounting is unchanged.
 
 ## Reconciliation (pure decision, no polling, no worker)
 

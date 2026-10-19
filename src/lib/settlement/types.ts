@@ -1,5 +1,6 @@
-import { ZERO, isNegative, parseMoney, subtractMoney, type Money } from "../money.ts";
+import { parseMoney, type Money } from "../money.ts";
 import type { ExecutionFill, ExternalOrderStatus, OrderSide, OrderStatus } from "../execution/types.ts";
+import type { FillProblem, SettledFill } from "./fills.ts";
 
 /**
  * Settlement service contracts — provider-neutral, pure, no I/O (Slice 6C).
@@ -44,6 +45,8 @@ export type SettlementFailureCode =
   | "INSUFFICIENT_RESERVATION"
   | "INVALID_FEE"
   | "INVALID_PRECISION"
+  /** A cumulative snapshot older than what is already settled (out-of-order delivery). */
+  | "STALE_SNAPSHOT"
   | "DATABASE_ERROR"
   | "UNKNOWN";
 
@@ -59,7 +62,19 @@ export type SettlementFailure = {
 export type SettlementResult =
   | { code: "SUCCESS"; tradeId: string }
   | { code: "DUPLICATE"; tradeId: string }
+  /** A cumulative snapshot that adds nothing to what is settled. Nothing was called. */
+  | { code: "NOTHING_NEW" }
   | SettlementFailure;
+
+/** The internal order a venue order id resolves to, as persisted. */
+export type SettlementOrder = {
+  orderId: string;
+  side: OrderSide;
+  status: OrderStatus;
+  amount: Money;
+  /** trading_orders.filled_amount */
+  filledAmount: Money;
+};
 
 /**
  * The outside world the settlement service needs, as a port. The real adapter
@@ -69,7 +84,9 @@ export type SettlementResult =
  * as input, so a caller cannot settle against an arbitrary order.
  */
 export interface SettlementGateway {
-  resolveOrderByExternalId(externalOrderId: string): Promise<{ orderId: string; side: OrderSide } | null>;
+  resolveOrderByExternalId(externalOrderId: string): Promise<SettlementOrder | null>;
+  /** Every trade the order already carries — the persisted settled state a delta is derived from. Throws when unreadable. */
+  listSettledFills(orderId: string): Promise<SettledFill[]>;
   resolveAssetId(symbol: string): Promise<string | null>;
   findTradeByProviderTradeId(providerTradeId: string): Promise<string | null>;
   /** Calls apply_fill. Returns the trade id, or the raw SQL error shape — never throws for a SQL error. */
@@ -116,12 +133,39 @@ const MESSAGES: Record<SettlementFailureCode, string> = {
   INSUFFICIENT_RESERVATION: "This fill exceeds the funds reserved for the order.",
   INVALID_FEE: "The fill's fee is not valid for this market.",
   INVALID_PRECISION: "The fill's amounts are inconsistent.",
+  STALE_SNAPSHOT: "This execution report is older than what is already settled.",
   DATABASE_ERROR: "Settlement could not be completed. Please retry.",
   UNKNOWN: "Settlement failed for an unexpected reason.",
 };
 
 function failure(code: SettlementFailureCode, retryable: boolean, reconcile: boolean): SettlementFailure {
   return { code, message: MESSAGES[code], retryable, reconcile };
+}
+
+/** A fill refused before `apply_fill` (see `./fills`), as a bounded settlement failure. */
+export function failureForFillProblem(problem: FillProblem): SettlementFailure {
+  switch (problem) {
+    case "OVER_FILL":
+      return failure("OVER_FILL", false, true);
+    case "ORDER_TERMINAL":
+    case "NOT_SUBMITTED":
+      return failure("ORDER_NOT_SETTLEABLE", false, true);
+    case "INVALID_FEE":
+      return failure("INVALID_FEE", false, false);
+    case "REGRESSION":
+      return failure("STALE_SNAPSHOT", false, false);
+    // The two reads straddled a settlement: transient, read again.
+    case "STATE_MISMATCH":
+      return failure("DATABASE_ERROR", true, false);
+    case "NOT_POSITIVE":
+      return failure("INVALID_FILL", false, false);
+    // A provider/internal inconsistency someone must look at.
+    case "SIDE_MISMATCH":
+    case "RESERVED_FILL_ID":
+    case "INCONSISTENT":
+    case "MIXED_FILL_MODES":
+      return failure("INVALID_FILL", false, true);
+  }
 }
 
 /**
@@ -177,8 +221,8 @@ const TERMINAL: readonly OrderStatus[] = ["FILLED", "CANCELLED", "REJECTED", "EX
  *   * otherwise                            → NOOP
  *
  * A cumulative-snapshot venue must NOT be passed here as a fill: see
- * `deriveFillDelta`. Each element of `providerFills` is a discrete fill with its
- * own `externalFillId`.
+ * `deriveCumulativeFill` (`./fills`). Each element of `providerFills` is a
+ * discrete fill with its own `externalFillId`.
  */
 export function decideReconciliation(input: {
   providerStatus: ExternalOrderStatus;
@@ -201,16 +245,4 @@ export function decideReconciliation(input: {
     return { kind: "RECONCILE_REQUIRED", reason: "venue reports FILLED but no settleable fills are available" };
   }
   return { kind: "NOOP" };
-}
-
-/**
- * Converts a venue's CUMULATIVE filled base into the delta not yet settled
- * internally. A cumulative snapshot is never itself a fill (settlement-spec
- * gap G6): an adapter computes this delta and, only if it is positive, mints a
- * discrete `ExecutionFill` (with its own `externalFillId`) for it. A
- * non-positive delta means nothing new to settle.
- */
-export function deriveFillDelta(cumulativeFilledBase: Money, internalFilledBase: Money): Money {
-  const delta = subtractMoney(cumulativeFilledBase, internalFilledBase);
-  return isNegative(delta) ? ZERO : delta;
 }

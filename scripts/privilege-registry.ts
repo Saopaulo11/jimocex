@@ -161,7 +161,10 @@ const FUNCTIONS_019: Record<FunctionName, Executors> = {
   release_withdrawal_hold: { executors: ["service_role"], calledFrom: `failed-withdrawal release (007); ${NO_CALLER_YET}` },
   place_limit_order: { executors: ["service_role"], calledFrom: "src/lib/engines/order-engine.ts placeLimitOrder() via the service-role client (018)" },
   cancel_order: { executors: ["service_role"], calledFrom: "src/lib/engines/order-engine.ts cancelOrder() via the service-role client (018)" },
-  apply_fill: { executors: ["service_role"], calledFrom: `atomic fill settlement (020); ${NO_CALLER_YET} — the ExecutionService will call it once a concrete LP adapter exists` },
+  apply_fill: { executors: ["service_role"], calledFrom: `atomic fill settlement (020, 022); ${NO_CALLER_YET} — the ExecutionService will call it once a concrete LP adapter exists` },
+  claim_order_for_submission: { executors: ["service_role"], calledFrom: `atomic OPEN → SUBMITTED claim (022); ${NO_CALLER_YET} — src/lib/execution/lifecycle-gateway.server.ts, used once a concrete LP adapter exists` },
+  record_provider_order_id: { executors: ["service_role"], calledFrom: `provider_order_id compare-and-set (022); ${NO_CALLER_YET} — src/lib/execution/lifecycle-gateway.server.ts` },
+  finalize_venue_cancellation: { executors: ["service_role"], calledFrom: `venue-confirmed remainder release (022); ${NO_CALLER_YET} — src/lib/execution/lifecycle-gateway.server.ts` },
   // Both answer for auth.uid(); the service_role key carries no user, so for
   // service_role they always return false. No RLS policy calls them (checked by
   // check-privileges.ts), and requireAdmin() reads admin_users instead.
@@ -229,6 +232,9 @@ export const SECURITY_DEFINER_FUNCTIONS: readonly string[] = [
   "place_limit_order",
   "cancel_order",
   "apply_fill",
+  "claim_order_for_submission",
+  "record_provider_order_id",
+  "finalize_venue_cancellation",
   "mark_trade_settled",
   "reconcile_wallets",
   "release_withdrawal_hold",

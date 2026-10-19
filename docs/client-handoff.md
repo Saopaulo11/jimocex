@@ -117,6 +117,10 @@ distinct integration tasks.
 - The end-to-end app↔Supabase trading flow should be verified in the client's
   own connected environment; it is not exercised against a hosted database here.
 - The audited migration gate in `docs/preview-environment.md` is pinned to the
-  current migrations (001–018, 020, 021); applying it to a hosted test database
-  still needs the owner's go. This does not mean live market data, a connected
+  current migrations (001–018, 020–022) and installs an **empty** test project
+  only (step 3). The existing Preview test project, installed at 021 and holding
+  demo data, is not rebuilt from 001–022: it gets 022 only through the separate
+  upgrade package of step 3b (`supabase/drafts/upgrade_021_022`). That procedure
+  is verified locally; the Preview itself remains at 021. Either step on a hosted
+  test database still needs the owner's go. This does not mean live market data, a connected
   execution venue, or live fills or settlement — none of those exist.

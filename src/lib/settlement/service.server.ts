@@ -1,10 +1,12 @@
 import "server-only";
 
+import { moneySelect } from "@/lib/db/money-columns";
 import { moneyArgs } from "@/lib/db/money-write";
+import { fromDatabase } from "@/lib/money";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 import { SettlementService } from "./service";
-import type { ApplyFillInput, SettlementGateway } from "./types";
+import type { ApplyFillInput, SettlementGateway, SettlementOrder } from "./types";
 
 /**
  * The real wiring for the settlement service (Slice 6C).
@@ -35,11 +37,42 @@ function buildGateway(admin: Admin): SettlementGateway {
       // was submitted; this is the only way the internal order is identified.
       const { data, error } = await admin
         .from("trading_orders")
-        .select("id, side")
+        .select(moneySelect("trading_orders", "id, side, status, amount, filled_amount"))
         .eq("provider_order_id", externalOrderId)
-        .maybeSingle();
+        .maybeSingle()
+        .overrideTypes<
+          { id: string; side: "BUY" | "SELL"; status: SettlementOrder["status"]; amount: string; filled_amount: string },
+          { merge: false }
+        >();
       if (error || !data) return null;
-      return { orderId: data.id, side: data.side };
+      return {
+        orderId: data.id,
+        side: data.side,
+        status: data.status,
+        amount: fromDatabase(data.amount, "trading_orders.amount"),
+        filledAmount: fromDatabase(data.filled_amount, "trading_orders.filled_amount"),
+      };
+    },
+
+    async listSettledFills(orderId) {
+      // Read-only: the settled state a cumulative delta is derived from. A read
+      // failure throws — settling without knowing what is settled is not an option.
+      const { data, error } = await admin
+        .from("trades")
+        .select(moneySelect("trades", "provider_trade_id, amount, quote_amount, fee"))
+        .or(`buy_order_id.eq.${orderId},sell_order_id.eq.${orderId}`)
+        .overrideTypes<
+          { provider_trade_id: string | null; amount: string; quote_amount: string; fee: string }[],
+          { merge: false }
+        >();
+      if (error || !data) throw new Error("settled fills could not be read");
+      return data.map((row) => ({
+        // apply_fill always sets it; an empty id never matches a venue's.
+        providerTradeId: row.provider_trade_id ?? "",
+        base: fromDatabase(row.amount, "trades.amount"),
+        quote: fromDatabase(row.quote_amount, "trades.quote_amount"),
+        fee: fromDatabase(row.fee, "trades.fee"),
+      }));
     },
 
     async resolveAssetId(symbol) {

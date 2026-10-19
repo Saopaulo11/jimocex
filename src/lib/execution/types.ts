@@ -29,16 +29,21 @@ export type OrderType = Database["public"]["Enums"]["order_type"];
 export type OrderStatus = Database["public"]["Enums"]["order_status"];
 
 /**
- * A venue's view of an order's lifecycle. Deliberately its OWN enum, not the
- * internal `order_status`: a provider reports provider states, and the service
- * maps them to internal states (`mapExternalStatus`) rather than letting a
- * provider's vocabulary leak into the core.
+ * A venue's view of an order's lifecycle, in neutral terms. Deliberately its OWN
+ * enum, not the internal `order_status`: an adapter translates its venue's raw
+ * statuses into these (`normalizeProviderStatus`, `./status-map`), and the
+ * lifecycle (`./lifecycle`) decides what each means internally — a provider's
+ * vocabulary never leaks into the core, and no status is ever written to an
+ * order directly. Anything an adapter cannot place is `UNKNOWN`, which fails
+ * closed.
  */
 export type ExternalOrderStatus =
   | "ACCEPTED"
   | "OPEN"
   | "PARTIALLY_FILLED"
   | "FILLED"
+  /** A cancel was requested and the venue has not confirmed it: the order may still fill. */
+  | "CANCEL_PENDING"
   | "CANCELLED"
   | "REJECTED"
   | "EXPIRED"
@@ -48,24 +53,45 @@ export type ExternalOrderStatus =
 export type ExternalOrderRef = {
   /** The venue's own order id — persisted to `trading_orders.provider_order_id`. */
   externalOrderId?: string;
-  /** Our idempotency key, echoed by the venue — persisted as `client_order_id`. */
+  /** Our idempotency reference at the venue — `venueClientOrderIdFor(internal order id)`. */
   clientOrderId?: string;
 };
 
 /**
- * What the Execution Service asks a venue to place. Only LIMIT is supported:
- * a MARKET order needs a price from a feed and a venue willing to fill at it,
- * and the core refuses MARKET before it ever reaches here.
+ * The idempotency reference an internal order carries to a venue. Derived from
+ * the internal order id — server-generated, globally unique, never typed by a
+ * customer — so the same order always presents the same reference and a replayed
+ * submission cannot open a second venue order. Deliberately NOT the order's
+ * `client_order_id`: that is the browser's form key, unique only per user, so
+ * two customers could present the same one to the venue. An adapter whose venue
+ * restricts the format may encode this deterministically and injectively.
+ */
+export function venueClientOrderIdFor(internalOrderId: string): string {
+  return internalOrderId;
+}
+
+/**
+ * What the Execution Service asks a venue to place: the order's identity and its
+ * execution intent, nothing financial. No balance, wallet, fee, reserve or
+ * ledger instruction crosses this boundary — the venue executes, the internal
+ * settlement decides what that means for money. Only LIMIT is supported: the core
+ * refuses MARKET before it ever reaches here.
  */
 export type ExecutionOrderRequest = {
-  /** Our idempotency key (the internal order's `client_order_id`). */
+  /** The internal order this request executes, for the adapter's own correlation. */
+  internalOrderId: string;
+  /** `venueClientOrderIdFor(internalOrderId)` — the venue's idempotency key. */
   clientOrderId: string;
   /** Canonical pair symbol, e.g. "BTC-USDT". */
   pair: string;
   side: OrderSide;
   type: Extract<OrderType, "LIMIT">;
+  /** The customer's limit price. */
   price: DecimalString;
+  /** The order's full base amount. */
   amount: DecimalString;
+  /** Base not yet filled internally; equals `amount` for a first submission. */
+  remainingAmount: DecimalString;
 };
 
 /** A venue's acknowledgement of a placement. */
@@ -81,10 +107,46 @@ export type ExecutionOrderView = {
   externalOrderId: string;
   clientOrderId?: string;
   status: ExternalOrderStatus;
+  /** Cumulative base filled at the venue. */
   filledAmount: DecimalString;
   remainingAmount: DecimalString;
   /** Volume-weighted average fill price, or null before any fill. */
   avgFillPrice: DecimalString | null;
+  /**
+   * Cumulative quote moved and fee charged, as the venue reports them. Required
+   * from a `CUMULATIVE` adapter (settlement derives each fill from them); a
+   * `DISCRETE` adapter reports fills one by one through `getFills` instead.
+   */
+  cumulativeQuote?: DecimalString;
+  cumulativeFee?: DecimalString;
+  feeAsset?: string;
+};
+
+/**
+ * How a venue reports execution, fixed per adapter:
+ *   * DISCRETE   — each fill arrives with its own trade id (`getFills`);
+ *   * CUMULATIVE — only running totals arrive (`getOrder`), and settlement
+ *                  derives each new fill from them (`deriveCumulativeFill`).
+ * An order is settled in one mode only; mixing them on one order is refused,
+ * because the two id schemes cannot see each other's fills.
+ */
+export type FillReporting = "DISCRETE" | "CUMULATIVE";
+
+/**
+ * A venue's running totals for one order — the input a CUMULATIVE venue gives
+ * settlement. It is never itself a fill: settlement subtracts what is already
+ * settled, from persisted state, and only the difference can move money.
+ */
+export type ExecutionSnapshot = {
+  externalOrderId: string;
+  side: OrderSide;
+  status: ExternalOrderStatus;
+  cumulativeBase: DecimalString;
+  cumulativeQuote: DecimalString;
+  cumulativeFee: DecimalString;
+  feeAsset: string;
+  /** When the venue reported these totals (the derived fill's executed_at). */
+  observedAt: Date;
 };
 
 /** One execution report line. `externalFillId` is the venue's trade id. */
@@ -128,6 +190,8 @@ export type ExecutionCallOptions = {
  */
 export interface ExecutionProvider {
   readonly name: string;
+  /** How this venue reports execution; decides which settlement path its fills take. */
+  readonly fillReporting: FillReporting;
   /** False when the adapter has no credentials or no venue configured. */
   isConfigured(): boolean;
 
@@ -199,34 +263,8 @@ export function toErrorInfo(error: ExecutionError): ExecutionErrorInfo {
 }
 
 // ---------------------------------------------------------------------------
-// Pure mapping helpers (provider-neutral → internal)
+// Pure helpers
 // ---------------------------------------------------------------------------
-
-/**
- * Maps a venue's order status to the internal `order_status`. A venue's
- * "ACCEPTED" means the order is resting on the book → internal `OPEN`. "UNKNOWN"
- * maps to nothing (null): an order the venue cannot find is a reconciliation
- * event for the caller to resolve against internal state, not a status to write.
- */
-export function mapExternalStatus(status: ExternalOrderStatus): OrderStatus | null {
-  switch (status) {
-    case "ACCEPTED":
-    case "OPEN":
-      return "OPEN";
-    case "PARTIALLY_FILLED":
-      return "PARTIALLY_FILLED";
-    case "FILLED":
-      return "FILLED";
-    case "CANCELLED":
-      return "CANCELLED";
-    case "REJECTED":
-      return "REJECTED";
-    case "EXPIRED":
-      return "EXPIRED";
-    case "UNKNOWN":
-      return null;
-  }
-}
 
 /**
  * Removes duplicate fills by `externalFillId`, keeping the first occurrence. A

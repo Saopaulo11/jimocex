@@ -440,6 +440,17 @@ transition status; write an `audit_logs` row.
   the transition and `cancel_order` returns `false` → safe no-op. Already
   enforced.
 
+> **Slice 14B (migration 022, written, applied nowhere) changes this section.**
+>
+> - A fill now needs `SUBMITTED` first: `OPEN → SUBMITTED → PARTIALLY_FILLED → FILLED`.
+>   `OPEN` no longer fills, and the guard enforces the full transition table.
+> - In scenario H, `cancel_order` releases only an `OPEN` order. A `SUBMITTED` or
+>   `PARTIALLY_FILLED` order ends through `finalize_venue_cancellation`, once the
+>   venue confirms it ended and every fill it executed is settled. That call
+>   releases the current `locked_amount`, the same remainder H describes.
+>
+> See docs/execution-provider.md, "Database lifecycle — migration 022".
+
 ---
 
 ## 14. Known schema gaps
@@ -465,7 +476,25 @@ transition status; write an `audit_logs` row.
 - **G6 — Cumulative-snapshot venues.** A venue that reports a cumulative filled
   amount instead of discrete fills with ids cannot be keyed on
   `provider_trade_id`; needs a derive-delta/reconcile path. Depends on real LP
-  report shape — not invented here.
+  report shape — not invented here. *Slice 14A: addressed in code without a
+  schema change — `deriveCumulativeFill` keys each derived fill on the settled
+  base it starts from (docs/settlement-service.md, "Cumulative snapshots").*
+- **G8 — No persisted SUBMITTED state; `cancel_order` is venue-unaware (Slice
+  14A).** A venue-live order could not be represented, and the customer's cancel
+  would release a reservation the venue could still execute against.
+  - **Status: closed in the schema by migration 022 (Slice 14B).** It adds the
+    `SUBMITTED` status, the atomic submission claim, the `provider_order_id`
+    compare-and-set, an OPEN-only `cancel_order`, the venue-confirmed
+    `finalize_venue_cancellation`, and `apply_fill` refusing never-submitted
+    orders.
+  - It is tested on throwaway clusters only and applied to no hosted database,
+    so G8 stays open for Preview and Production until 022 is applied there
+    (docs/execution-provider.md, "Database lifecycle — migration 022").
+- **G3 update (Slice 14B).** 022's guard also enforces the transition table and
+  a set-once `provider_order_id`. A `filled_amount` without trades behind it is
+  still not rejected on write, but `finalize_venue_cancellation` refuses to
+  release against one (it compares `filled_amount` with the sum of the order's
+  trades).
 - **G7 — `average_price` write.** The column exists; `apply_fill` computes VWAP in
   exact `Money`. No schema change; noted so 6B defines the rounding (§8).
 

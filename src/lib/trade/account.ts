@@ -23,7 +23,7 @@ import type { OpenOrderView, OrderSideValue, OrderStatusValue, OrderTypeValue, P
  */
 
 /** Non-terminal statuses — an order still resting with funds held. */
-const OPEN_STATUSES: readonly OrderStatusValue[] = ["PENDING", "OPEN", "PARTIALLY_FILLED"];
+const OPEN_STATUSES: readonly OrderStatusValue[] = ["PENDING", "OPEN", "SUBMITTED", "PARTIALLY_FILLED"];
 
 /** Every wallet the signed-in user holds, as exact decimal strings. */
 export async function getWalletBalances(): Promise<PairBalance[]> {

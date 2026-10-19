@@ -4,7 +4,8 @@ import { describe, test } from "node:test";
 import { formatMoney, parseMoney, toDecimalString, type DecimalString } from "../../money.ts";
 import type { ExecutionFill, OrderSide } from "../../execution/types.ts";
 import { SettlementService } from "../service.ts";
-import type { ApplyFillInput, SettlementGateway } from "../types.ts";
+import type { SettledFill } from "../fills.ts";
+import type { ApplyFillInput, SettlementGateway, SettlementOrder } from "../types.ts";
 
 /**
  * SettlementService tests (Slice 6C). The gateway is a DETERMINISTIC TEST DOUBLE
@@ -31,6 +32,8 @@ const fill = (over: Partial<ExecutionFill> = {}): ExecutionFill => ({
 
 type Cfg = {
   order?: { orderId: string; side: OrderSide } | null;
+  status?: SettlementOrder["status"];
+  settled?: SettledFill[];
   assetId?: string | null;
   existingTrade?: string | null;
   applyResult?: { ok: true; tradeId: string } | { ok: false; code?: string | null; message?: string | null };
@@ -47,8 +50,14 @@ class FakeGateway implements SettlementGateway {
     this.cfg = cfg;
   }
 
-  async resolveOrderByExternalId(): Promise<{ orderId: string; side: OrderSide } | null> {
-    return this.cfg.order === undefined ? { orderId: "order-1", side: "BUY" } : this.cfg.order;
+  async resolveOrderByExternalId(): Promise<SettlementOrder | null> {
+    const order = this.cfg.order === undefined ? { orderId: "order-1", side: "BUY" as OrderSide } : this.cfg.order;
+    // A submitted 1-BTC order with nothing settled: room for every fill these tests send.
+    return order && { ...order, status: this.cfg.status ?? "SUBMITTED", amount: parseMoney("1"), filledAmount: parseMoney("0") };
+  }
+
+  async listSettledFills(): Promise<SettledFill[]> {
+    return this.cfg.settled ?? [];
   }
 
   async resolveAssetId(symbol: string): Promise<string | null> {
@@ -164,5 +173,21 @@ describe("settleFill — apply_fill error classification", () => {
     const gw = new FakeGateway({ applyThrows: true });
     const r = await new SettlementService(gw).settleFill(fill());
     assert.ok(r.code === "DATABASE_ERROR" && r.retryable === true);
+  });
+});
+
+describe("settleFill — the order must have been submitted (022)", () => {
+  test("a fill for an OPEN order is refused before apply_fill", async () => {
+    const gw = new FakeGateway({ status: "OPEN" });
+    const result = await new SettlementService(gw).settleFill(fill());
+    assert.equal(result.code, "ORDER_NOT_SETTLEABLE");
+    assert.equal(gw.applyInputs.length, 0);
+  });
+
+  test("SUBMITTED and PARTIALLY_FILLED orders take fills", async () => {
+    for (const status of ["SUBMITTED", "PARTIALLY_FILLED"] as const) {
+      const gw = new FakeGateway({ status });
+      assert.equal((await new SettlementService(gw).settleFill(fill())).code, "SUCCESS");
+    }
   });
 });

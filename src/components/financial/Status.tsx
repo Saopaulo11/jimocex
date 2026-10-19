@@ -43,6 +43,7 @@ const DEPOSIT: Record<Enums["deposit_status"], { label: string; tone: BadgeTone 
 const ORDER: Record<Enums["order_status"], { label: string; tone: BadgeTone }> = {
   PENDING: { label: "Pending", tone: "info" },
   OPEN: { label: "Open", tone: "info" },
+  SUBMITTED: { label: "Submitted", tone: "info" },
   PARTIALLY_FILLED: { label: "Partially filled", tone: "info" },
   FILLED: { label: "Filled", tone: "success" },
   CANCELLED: { label: "Cancelled", tone: "neutral" },

@@ -18,7 +18,7 @@ import type { OrderSideValue, OrderStatusValue, OrderTypeValue } from "./types";
  */
 
 /** Non-terminal statuses — an order still resting with funds held. */
-const OPEN_STATUSES: readonly OrderStatusValue[] = ["PENDING", "OPEN", "PARTIALLY_FILLED"];
+const OPEN_STATUSES: readonly OrderStatusValue[] = ["PENDING", "OPEN", "SUBMITTED", "PARTIALLY_FILLED"];
 
 export type OrderRow = {
   id: string;

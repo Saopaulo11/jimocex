@@ -24,6 +24,8 @@ import {
  */
 export class UnavailableExecutionProvider implements ExecutionProvider {
   readonly name = "unavailable";
+  // Nominal: it reports nothing in either mode.
+  readonly fillReporting = "DISCRETE" as const;
 
   isConfigured(): boolean {
     return false;

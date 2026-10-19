@@ -222,6 +222,12 @@ export const DB_FUNCTIONS = {
     result: [],
     executors: ["service_role"],
   },
+  // 022: the venue-safe lifecycle. The claim and the venue-id record carry no
+  // money; the release takes the venue's final cumulative (money in) and
+  // releases what is locked — it has no amount parameter.
+  claim_order_for_submission: SERVER_ONLY,
+  record_provider_order_id: SERVER_ONLY,
+  finalize_venue_cancellation: { args: ["p_venue_filled_amount"], result: [], executors: ["service_role"] },
   claim_deposit_for_credit: SERVER_ONLY,
   claim_provider_event: SERVER_ONLY,
   expire_stale_quotes: SERVER_ONLY,

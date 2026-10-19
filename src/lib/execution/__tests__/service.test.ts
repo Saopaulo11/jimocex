@@ -25,12 +25,14 @@ import {
 const d = (s: string): DecimalString => toDecimalString(parseMoney(s));
 
 const request = (over: Partial<ExecutionOrderRequest> = {}): ExecutionOrderRequest => ({
+  internalOrderId: "order-1",
   clientOrderId: "cid-1",
   pair: "BTC-USDT",
   side: "BUY",
   type: "LIMIT",
   price: d("60000"),
   amount: d("0.1"),
+  remainingAmount: d("0.1"),
   ...over,
 });
 
@@ -45,6 +47,7 @@ type Handlers = {
 /** Named deterministic test double. Not a production provider. */
 class StubExecutionProvider implements ExecutionProvider {
   readonly name = "stub";
+  readonly fillReporting = "DISCRETE" as const;
   readonly calls = {
     placeOrder: [] as ExecutionOrderRequest[],
     cancelOrder: [] as ExternalOrderRef[],

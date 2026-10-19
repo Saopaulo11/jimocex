@@ -579,6 +579,8 @@ begin
 
   insert into public.trading_orders (user_id, pair_id, side, type, price, amount, status)
   values (a, pair, 'BUY', 'LIMIT', 50000, 1, 'OPEN') returning id into o;
+  -- 022: an order fills only once submitted (OPEN → SUBMITTED → FILLED).
+  update public.trading_orders set status = 'SUBMITTED' where id = o;
   update public.trading_orders set filled_amount = 1, status = 'FILLED' where id = o;
   perform pg_temp.rejects('§19.9 filled order cannot be cancelled', format(
     $q$ update public.trading_orders set status = 'CANCELLED' where id = %L $q$, o));
@@ -591,8 +593,10 @@ begin
 
   insert into public.trading_orders (user_id, pair_id, side, type, price, amount, status)
   values (a, pair, 'BUY', 'LIMIT', 50000, 10, 'OPEN') returning id into o;
-  perform pg_temp.rejects('FILLED requires filled_amount = amount', format(
-    $q$ update public.trading_orders set filled_amount = 3, status = 'FILLED' where id = %L $q$, o));
+  -- Submitted first, so the refusal below is the amount check, not the lifecycle (022).
+  update public.trading_orders set status = 'SUBMITTED' where id = o;
+  perform pg_temp.rejects_with('FILLED requires filled_amount = amount', format(
+    $q$ update public.trading_orders set filled_amount = 3, status = 'FILLED' where id = %L $q$, o), '23514');
   perform pg_temp.rejects('order cannot fill beyond its own size', format(
     $q$ update public.trading_orders set filled_amount = 99 where id = %L $q$, o));
 
@@ -1806,6 +1810,9 @@ begin
   -- Reserve 100,200 USDT (notional 100,000 + fee 200) for BUY 1 BTC @ 100,000.
   perform public.ledger_post(u, usdt, 'DEPOSIT', 100200, 100200, 0, 'test', null, 'tst:fill:buyfund');
   buy := public.place_limit_order(u, pair, 'BUY', 100000, 1, usdt, 100200, 'fill-buy', 200);
+  -- 022: a fill applies only to an order submitted to a venue.
+  perform public.claim_order_for_submission(u, buy);
+  perform public.record_provider_order_id(u, buy, 'tst-venue-buy');
 
   -- Fill #1: 0.25 BTC @ 99,500 (price improvement) → quote 24,875, fee 49.75.
   tr := public.apply_fill(buy, 'f-b1', 0.25, 24875, 99500, 49.75, usdt, now());
@@ -1848,6 +1855,8 @@ begin
   -- ------------------------------------------------------------------- SELL
   -- eve now holds 1 BTC. SELL 1 BTC @ 100,000 reserves 1 BTC (base).
   sell := public.place_limit_order(u, pair, 'SELL', 100000, 1, btc, 1, 'fill-sell', 0);
+  perform public.claim_order_for_submission(u, sell);
+  perform public.record_provider_order_id(u, sell, 'tst-venue-sell');
   -- Fill 0.4 BTC @ 100,500 → proceeds 40,200 USDT, fee 80.4 from proceeds.
   perform public.apply_fill(sell, 'f-s1', 0.4, 40200, 100500, 80.4, usdt, now());
   select status, filled_amount, locked_amount into ostatus, ofilled, olock from public.trading_orders where id = sell;
@@ -1858,8 +1867,14 @@ begin
   perform pg_temp.holds('apply_fill SELL partial: base 0 avail / 0.6 locked', bavail = 0 and block = 0.6);
   perform pg_temp.holds('apply_fill SELL partial: proceeds net of fee (501 + 40,119.6)', uavail = 40620.6 and ulock = 0);
 
-  -- Cancel after a partial fill: settled base kept, remaining reservation released.
-  perform pg_temp.holds('cancel after partial fill returns true', public.cancel_order(u, sell));
+  -- Cancel after a partial fill (022): the customer's cancel releases nothing —
+  -- the venue may still execute — and the venue-confirmed release frees exactly
+  -- the remainder once the venue's final cumulative (0.4) is settled.
+  perform pg_temp.holds('customer cancel after a partial fill is refused (022)', not public.cancel_order(u, sell));
+  select status, locked_amount into ostatus, olock from public.trading_orders where id = sell;
+  perform pg_temp.holds('the refused cancel left the 0.6 base reserved', ostatus = 'PARTIALLY_FILLED' and olock = 0.6);
+  perform pg_temp.holds('cancel after partial, venue-confirmed: FINALIZED',
+    public.finalize_venue_cancellation(sell, 'tst-venue-sell', 'CANCELLED', 0.4) = 'FINALIZED');
   select status, filled_amount, locked_amount into ostatus, ofilled, olock from public.trading_orders where id = sell;
   perform pg_temp.holds('cancel after partial: CANCELLED, settled 0.4 preserved, no residual lock',
     ostatus = 'CANCELLED' and ofilled = 0.4 and olock = 0);
@@ -1869,6 +1884,9 @@ begin
   -- ------------------------------------------------------ validation refusals
   -- A small OPEN order to attack; it must be untouched by every refusal.
   small := public.place_limit_order(u, pair, 'BUY', 100000, 0.001, usdt, 100, 'fill-small', 0);
+  -- Submitted, so each refusal below is apply_fill's own validation (022).
+  perform public.claim_order_for_submission(u, small);
+  perform public.record_provider_order_id(u, small, 'tst-venue-small');
   perform pg_temp.rejects('apply_fill refuses over-fill',
     format($q$ select public.apply_fill(%L, 'f-of', '0.002', '200', '100000', '0', null, now()) $q$, small));
   perform pg_temp.rejects('apply_fill refuses a zero base amount',
@@ -1878,8 +1896,8 @@ begin
   perform pg_temp.rejects('apply_fill refuses a fee not in the quote asset (gap G2)',
     format($q$ select public.apply_fill(%L, 'f-fa', '0.0005', '50', '100000', '1', %L, now()) $q$, small, btc));
   select status, filled_amount, locked_amount into ostatus, ofilled, olock from public.trading_orders where id = small;
-  perform pg_temp.holds('a refused fill leaves the order untouched (OPEN, filled 0, 100 locked)',
-    ostatus = 'OPEN' and ofilled = 0 and olock = 100);
+  perform pg_temp.holds('a refused fill leaves the order untouched (SUBMITTED, filled 0, 100 locked)',
+    ostatus = 'SUBMITTED' and ofilled = 0 and olock = 100);
   perform pg_temp.holds('a refused fill posts no trade',
     not exists (select 1 from public.trades where buy_order_id = small));
 
@@ -1891,6 +1909,337 @@ begin
     not exists (select 1 from public.reconcile_wallets() x where x.user_id = u));
 end;
 $$;
+
+-- -----------------------------------------------------------------------------
+-- §14B / 022 — the venue-safe lifecycle: SUBMITTED, the submission claim, the
+-- provider_order_id compare-and-set, the customer's cancel vs the
+-- venue-confirmed release, and apply_fill's submission requirement.
+--
+-- BTC-USDT throughout. A 0.01 BTC BUY at 80,000 reserves 801.6 USDT (800 + a
+-- 1.6 fee); a 0.001 BTC BUY reserves 80.16.
+-- -----------------------------------------------------------------------------
+insert into auth.users (id, email) values
+  ('00000000-0000-4000-8000-00000000014b', 'frank@test.invalid'),
+  ('00000000-0000-4000-8000-00000000014c', 'grace@test.invalid');
+
+-- Rejected with this SQLSTATE AND a message containing this fragment: for
+-- refusals that share a SQLSTATE with another guard, this proves which fired.
+create function pg_temp.rejects_matching(p_name text, p_sql text, p_sqlstate text, p_fragment text) returns void
+language plpgsql as $fn$
+begin
+  begin
+    execute p_sql;
+    -- Accepted: undo it, so one wrongly accepted write cannot cascade into the tests after it.
+    raise exception using errcode = 'P0B14', message = 'accepted';
+  exception when others then
+    if sqlstate = 'P0B14' then
+      insert into test_results (name, passed, detail)
+      values (p_name, false, 'statement was ACCEPTED but must be rejected');
+      return;
+    end if;
+    if sqlstate <> p_sqlstate and pg_temp.is_test_defect(sqlstate) then raise; end if;
+    insert into test_results (name, passed, detail)
+    values (p_name, sqlstate = p_sqlstate and strpos(sqlerrm, p_fragment) > 0,
+            case when sqlstate = p_sqlstate and strpos(sqlerrm, p_fragment) > 0 then sqlerrm
+                 else format('rejected with %s (%s), expected %s mentioning %L', sqlstate, sqlerrm, p_sqlstate, p_fragment) end);
+  end;
+end;
+$fn$;
+
+do $$
+declare
+  u      uuid := '00000000-0000-4000-8000-00000000014b';
+  other  uuid := '00000000-0000-4000-8000-00000000014c';
+  usdt   uuid := (select id from public.assets where symbol = 'USDT');
+  btc    uuid := (select id from public.assets where symbol = 'BTC');
+  pair   uuid;
+  o1 uuid; o2 uuid; o3 uuid; o4 uuid; o5 uuid; o6 uuid; mkt uuid;
+  tr uuid; tr_dup uuid;
+  claimed uuid; r text; ok boolean;
+  avail_before numeric; avail_after numeric;
+  ostatus public.order_status; ofilled numeric; olock numeric; opid text;
+begin
+  update public.trading_pairs set trading_enabled = true where symbol = 'BTC-USDT';
+  select id into pair from public.trading_pairs where symbol = 'BTC-USDT';
+  perform public.ledger_post(u, usdt, 'DEPOSIT', 10000, 10000, 0, 'test', null, 'tst:022:usdt');
+  perform public.ledger_post(u, btc, 'DEPOSIT', 1, 1, 0, 'test', null, 'tst:022:btc');
+
+  o1 := public.place_limit_order(u, pair, 'BUY', 80000, 0.01, usdt, 801.6, '022-o1', 1.6);
+  o2 := public.place_limit_order(u, pair, 'BUY', 80000, 0.001, usdt, 80.16, '022-o2', 0.16);
+  o3 := public.place_limit_order(u, pair, 'BUY', 80000, 0.001, usdt, 80.16, '022-o3', 0.16);
+
+  -- ------------------------------------------------------ submission claim
+  claimed := public.claim_order_for_submission(u, o1);
+  perform pg_temp.holds('022 (1) claim moves OPEN → SUBMITTED and returns the order',
+    claimed = o1 and (select status = 'SUBMITTED' from public.trading_orders where id = o1));
+  perform pg_temp.holds('022 claim leaves the reservation exactly as placed',
+    (select locked_amount = 801.6 and filled_amount = 0 and provider_order_id is null from public.trading_orders where id = o1));
+  perform pg_temp.holds('022 (10) a second claim of a claimed order gets nothing',
+    public.claim_order_for_submission(u, o1) is null);
+  perform pg_temp.holds('022 (37) another user cannot claim the order',
+    public.claim_order_for_submission(other, o3) is null
+    and (select status = 'OPEN' from public.trading_orders where id = o3));
+  perform pg_temp.holds('022 the claim is audited once',
+    (select count(*) from public.audit_logs where action = 'order.submit' and entity_id = o1) = 1);
+  perform pg_temp.holds('022 claim of o2 (venue never acknowledges it)', public.claim_order_for_submission(u, o2) = o2);
+
+  -- MARKET stays unsupported (35): no reserve, nothing to submit.
+  insert into public.trading_orders (user_id, pair_id, side, type, amount, status)
+  values (u, pair, 'BUY', 'MARKET', 0.01, 'OPEN') returning id into mkt;
+  perform pg_temp.holds('022 (35) a MARKET order cannot be claimed for submission',
+    public.claim_order_for_submission(u, mkt) is null
+    and (select status = 'OPEN' from public.trading_orders where id = mkt));
+
+  -- -------------------------------------------- provider_order_id compare-and-set
+  perform pg_temp.holds('022 (12) the venue order id is recorded once',
+    public.record_provider_order_id(u, o1, 'V-022-1') = 'RECORDED');
+  perform pg_temp.holds('022 (14) the same venue id again is an idempotent replay',
+    public.record_provider_order_id(u, o1, 'V-022-1') = 'ALREADY_RECORDED');
+  perform pg_temp.holds('022 (13) a different venue id is refused and the first is kept',
+    public.record_provider_order_id(u, o1, 'V-022-other') = 'CONFLICT'
+    and (select provider_order_id = 'V-022-1' from public.trading_orders where id = o1));
+  perform pg_temp.holds('022 (15) a venue id held by another order cannot be assigned',
+    public.record_provider_order_id(u, o2, 'V-022-1') = 'CONFLICT'
+    and (select provider_order_id is null from public.trading_orders where id = o2));
+  perform pg_temp.holds('022 (37) another user cannot record a venue id on the order',
+    public.record_provider_order_id(other, o2, 'V-022-2') = 'CONFLICT'
+    and (select provider_order_id is null from public.trading_orders where id = o2));
+  perform pg_temp.holds('022 no venue id on an order that was never submitted',
+    public.record_provider_order_id(u, o3, 'V-022-3') = 'CONFLICT'
+    and (select provider_order_id is null from public.trading_orders where id = o3));
+  perform pg_temp.rejects_with('022 a blank venue id is refused',
+    format($q$ select public.record_provider_order_id(%L, %L, '  ') $q$, u, o2), '23514');
+  -- The guard holds even for a direct write by the table's owner.
+  perform pg_temp.rejects_matching('022 guard: provider_order_id cannot be overwritten',
+    format($q$ update public.trading_orders set provider_order_id = 'V-022-9' where id = %L $q$, o1), '23001', 'cannot change');
+  perform pg_temp.rejects_matching('022 guard: provider_order_id cannot be cleared',
+    format($q$ update public.trading_orders set provider_order_id = null where id = %L $q$, o1), '23001', 'cannot change');
+  perform pg_temp.rejects_matching('022 guard: a venue id cannot be written onto an OPEN order',
+    format($q$ update public.trading_orders set provider_order_id = 'V-022-x' where id = %L $q$, o3), '23001', 'only on a SUBMITTED order');
+
+  -- ------------------------------------------------- illegal transitions (guard)
+  perform pg_temp.rejects_matching('022 (6) OPEN → FILLED is refused',
+    format($q$ update public.trading_orders set filled_amount = amount, status = 'FILLED' where id = %L $q$, o3), '23001', 'not a legal order transition');
+  perform pg_temp.rejects_matching('022 (7) OPEN → PARTIALLY_FILLED is refused',
+    format($q$ update public.trading_orders set filled_amount = 0.0005, status = 'PARTIALLY_FILLED' where id = %L $q$, o3), '23001', 'not a legal order transition');
+  perform pg_temp.rejects_matching('022 SUBMITTED → OPEN is refused',
+    format($q$ update public.trading_orders set status = 'OPEN' where id = %L $q$, o2), '23001', 'not a legal order transition');
+  perform pg_temp.rejects_matching('022 OPEN → REJECTED is refused (no release into it exists)',
+    format($q$ update public.trading_orders set status = 'REJECTED' where id = %L $q$, o3), '23001', 'not a legal order transition');
+
+  -- ------------------------------------------------------ fills need a venue
+  perform pg_temp.rejects_matching('022 (23) apply_fill refuses an OPEN order',
+    format($q$ select public.apply_fill(%L, 'f-022-open', '0.001', '80', '80000', '0', null, now()) $q$, o3), '23001', 'never submitted');
+  perform pg_temp.rejects_matching('022 apply_fill refuses a SUBMITTED order without a venue id',
+    format($q$ select public.apply_fill(%L, 'f-022-noid', '0.001', '80', '80000', '0', null, now()) $q$, o2), '23001', 'never submitted');
+  perform pg_temp.rejects_matching('022 (35) apply_fill refuses a MARKET order (never submitted)',
+    format($q$ select public.apply_fill(%L, 'f-022-mkt', '0.001', '80', '80000', '0', null, now()) $q$, mkt), '23001', 'never submitted');
+  perform pg_temp.holds('022 refused fills post no trade',
+    not exists (select 1 from public.trades where buy_order_id in (o2, o3, mkt)));
+
+  -- (2, 24, 30) SUBMITTED takes a fill: 0.003 @ 80,000 → quote 240, fee 0.48.
+  tr := public.apply_fill(o1, 'f-022-1', 0.003, 240, 80000, 0.48, usdt, now());
+  select status, filled_amount, locked_amount into ostatus, ofilled, olock from public.trading_orders where id = o1;
+  perform pg_temp.holds('022 (2) SUBMITTED → PARTIALLY_FILLED on a partial fill', ostatus = 'PARTIALLY_FILLED' and ofilled = 0.003);
+  perform pg_temp.holds('022 (30) the fill drew the reservation down by quote + fee (801.6 → 561.12)', olock = 561.12);
+  -- (25) PARTIALLY_FILLED takes another fill.
+  perform public.apply_fill(o1, 'f-022-2', 0.003, 240, 80000, 0.48, usdt, now());
+  select status, filled_amount, locked_amount into ostatus, ofilled, olock from public.trading_orders where id = o1;
+  perform pg_temp.holds('022 (25) PARTIALLY_FILLED takes another fill (0.006 settled, 320.64 left)',
+    ostatus = 'PARTIALLY_FILLED' and ofilled = 0.006 and olock = 320.64);
+  -- (26) a replayed provider_trade_id changes nothing.
+  tr_dup := public.apply_fill(o1, 'f-022-1', 0.003, 240, 80000, 0.48, usdt, now());
+  perform pg_temp.holds('022 (26) a duplicate provider_trade_id returns the original trade, changes nothing',
+    tr_dup = tr and (select filled_amount = 0.006 and locked_amount = 320.64 from public.trading_orders where id = o1)
+    and (select count(*) from public.trades where buy_order_id = o1) = 2);
+  -- (27) over-fill.
+  perform pg_temp.rejects_matching('022 (27) apply_fill still refuses an over-fill',
+    format($q$ select public.apply_fill(%L, 'f-022-of', '0.005', '400', '80000', '0.8', %L, now()) $q$, o1, usdt), '23514', 'exceeds order');
+  perform pg_temp.rejects_matching('022 PARTIALLY_FILLED → SUBMITTED is refused',
+    format($q$ update public.trading_orders set status = 'SUBMITTED' where id = %L $q$, o1), '23001', 'not a legal order transition');
+
+  -- ------------------------------------------------- the customer's cancel
+  select available_balance into avail_before from public.wallets where user_id = u and asset_id = usdt;
+  perform pg_temp.holds('022 (17) customer cancel of a PARTIALLY_FILLED order is refused', not public.cancel_order(u, o1));
+  perform pg_temp.holds('022 (16) customer cancel of a SUBMITTED order is refused', not public.cancel_order(u, o2));
+  select available_balance into avail_after from public.wallets where user_id = u and asset_id = usdt;
+  perform pg_temp.holds('022 refused cancels released nothing: funds stay reserved while the venue may execute',
+    avail_after = avail_before
+    and (select locked_amount = 320.64 and status = 'PARTIALLY_FILLED' from public.trading_orders where id = o1)
+    and (select locked_amount = 80.16 and status = 'SUBMITTED' from public.trading_orders where id = o2)
+    and not exists (select 1 from public.ledger_entries where reference_id in (o1, o2) and entry_type = 'RELEASE'));
+  perform pg_temp.holds('022 (37) another user cannot cancel the order', not public.cancel_order(other, o3));
+  ok := public.cancel_order(u, o3);
+  perform pg_temp.holds('022 OPEN is still the customer''s to cancel (releases 80.16)',
+    ok and (select status = 'CANCELLED' and locked_amount = 0 from public.trading_orders where id = o3)
+    and (select amount = 80.16 from public.ledger_entries where reference_id = o3 and entry_type = 'RELEASE'));
+  -- (8) CANCELLED is terminal.
+  perform pg_temp.rejects_matching('022 (8) CANCELLED → OPEN is refused',
+    format($q$ update public.trading_orders set status = 'OPEN' where id = %L $q$, o3), '23001', 'terminal');
+  perform pg_temp.rejects_matching('022 (8) CANCELLED → SUBMITTED is refused',
+    format($q$ update public.trading_orders set status = 'SUBMITTED' where id = %L $q$, o3), '23001', 'terminal');
+  perform pg_temp.holds('022 (8) a cancelled order cannot be claimed again', public.claim_order_for_submission(u, o3) is null);
+
+  -- ------------------------------------------- the venue-confirmed release
+  perform pg_temp.rejects_with('022 finalize requires a FINAL venue status',
+    format($q$ select public.finalize_venue_cancellation(%L, 'V-022-1', 'OPEN', '0.006') $q$, o1), '23514');
+  perform pg_temp.rejects_with('022 finalize refuses a negative venue cumulative',
+    format($q$ select public.finalize_venue_cancellation(%L, 'V-022-1', 'CANCELLED', '-1') $q$, o1), '23514');
+  perform pg_temp.rejects_with('022 finalize refuses a NaN venue cumulative',
+    format($q$ select public.finalize_venue_cancellation(%L, 'V-022-1', 'CANCELLED', 'NaN') $q$, o1), '23514');
+  perform pg_temp.holds('022 (19) venue ended with a fill not yet settled (0.009 > 0.006): nothing released',
+    public.finalize_venue_cancellation(o1, 'V-022-1', 'CANCELLED', 0.009) = 'FILLED_MISMATCH');
+  perform pg_temp.holds('022 (20) a venue cumulative below what is settled: nothing released',
+    public.finalize_venue_cancellation(o1, 'V-022-1', 'CANCELLED', 0.003) = 'FILLED_MISMATCH');
+  perform pg_temp.holds('022 a confirmation about another venue order: nothing released',
+    public.finalize_venue_cancellation(o1, 'V-022-other', 'CANCELLED', 0.006) = 'VENUE_ORDER_MISMATCH');
+  perform pg_temp.holds('022 the refused finalizations changed nothing',
+    (select status = 'PARTIALLY_FILLED' and locked_amount = 320.64 from public.trading_orders where id = o1)
+    and not exists (select 1 from public.ledger_entries where reference_id = o1 and entry_type = 'RELEASE'));
+  perform pg_temp.holds('022 an OPEN order is not the venue''s to finalize',
+    public.finalize_venue_cancellation(mkt, null, 'CANCELLED', 0) = 'NOT_SUBMITTED');
+
+  -- (5, 18, 22, 31) venue ended, every fill settled → exactly the remainder.
+  select available_balance into avail_before from public.wallets where user_id = u and asset_id = usdt;
+  perform pg_temp.holds('022 (18) venue ended and every fill settled → FINALIZED',
+    public.finalize_venue_cancellation(o1, 'V-022-1', 'CANCELLED', 0.006) = 'FINALIZED');
+  select available_balance into avail_after from public.wallets where user_id = u and asset_id = usdt;
+  perform pg_temp.holds('022 (22/31) the release is what was still locked (320.64) — never the original hold (801.6)',
+    avail_after - avail_before = 320.64
+    and (select amount = 320.64 from public.ledger_entries where reference_id = o1 and entry_type = 'RELEASE'));
+  perform pg_temp.holds('022 the venue release posts under the order''s one release key, shared with cancel_order: neither path can release it twice',
+    (select dedup_key = 'order:release:' || o1::text from public.ledger_entries where reference_id = o1 and entry_type = 'RELEASE'));
+  select status, filled_amount, locked_amount into ostatus, ofilled, olock from public.trading_orders where id = o1;
+  perform pg_temp.holds('022 (5) PARTIALLY_FILLED → CANCELLED via the venue release; settled 0.006 kept',
+    ostatus = 'CANCELLED' and ofilled = 0.006 and olock = 0);
+  perform pg_temp.holds('022 (21) finalizing again releases nothing',
+    public.finalize_venue_cancellation(o1, 'V-022-1', 'CANCELLED', 0.006) = 'ALREADY_FINALIZED'
+    and (select count(*) from public.ledger_entries where reference_id = o1 and entry_type = 'RELEASE') = 1);
+  perform pg_temp.rejects_matching('022 (8) a venue-cancelled order takes no new fill',
+    format($q$ select public.apply_fill(%L, 'f-022-late', '0.001', '80', '80000', '0', null, now()) $q$, o1), '23001', 'cannot take a new fill');
+
+  -- (4) SUBMITTED → CANCELLED only through the venue: o2 was never acknowledged.
+  perform pg_temp.holds('022 a never-acknowledged order: a confirmation naming a venue id is refused',
+    public.finalize_venue_cancellation(o2, 'V-022-2', 'REJECTED', 0) = 'VENUE_ORDER_MISMATCH');
+  perform pg_temp.holds('022 a never-acknowledged order cannot have executed',
+    public.finalize_venue_cancellation(o2, null, 'REJECTED', 0.001) = 'FILLED_MISMATCH');
+  r := public.finalize_venue_cancellation(o2, null, 'REJECTED', 0);
+  perform pg_temp.holds('022 (4) SUBMITTED → CANCELLED once the venue confirms it holds nothing',
+    r = 'FINALIZED'
+    and (select status = 'CANCELLED' and locked_amount = 0 from public.trading_orders where id = o2)
+    and (select amount = 80.16 from public.ledger_entries where reference_id = o2 and entry_type = 'RELEASE'));
+
+  -- A filled amount no settled trade backs (a direct write, not apply_fill): even
+  -- with the venue's figure matching it, nothing is released.
+  perform public.ledger_post(other, usdt, 'DEPOSIT', 100, 100, 0, 'test', null, 'tst:022:other');
+  o6 := public.place_limit_order(other, pair, 'BUY', 80000, 0.001, usdt, 80.16, '022-o6', 0.16);
+  perform public.claim_order_for_submission(other, o6);
+  perform public.record_provider_order_id(other, o6, 'V-022-6');
+  update public.trading_orders set filled_amount = 0.0005, status = 'PARTIALLY_FILLED' where id = o6;
+  perform pg_temp.holds('022 a filled amount without settled trades behind it: nothing released',
+    public.finalize_venue_cancellation(o6, 'V-022-6', 'CANCELLED', 0.0005) = 'FILLED_MISMATCH');
+  perform pg_temp.holds('022 that refusal left the reservation in place',
+    (select locked_amount = 80.16 and status = 'PARTIALLY_FILLED' from public.trading_orders where id = o6));
+
+  -- (3) SUBMITTED → FILLED; price improvement released by apply_fill as before.
+  o4 := public.place_limit_order(u, pair, 'BUY', 80000, 0.01, usdt, 801.6, '022-o4', 1.6);
+  perform public.claim_order_for_submission(u, o4);
+  perform public.record_provider_order_id(u, o4, 'V-022-4');
+  perform public.apply_fill(o4, 'f-022-4', 0.01, 799, 79900, 1.598, usdt, now());
+  perform pg_temp.holds('022 (3) SUBMITTED → FILLED in one fill; the 1.002 residual released (020 accounting)',
+    (select status = 'FILLED' and filled_amount = 0.01 and locked_amount = 0 from public.trading_orders where id = o4)
+    and (select amount = 1.002 from public.ledger_entries
+         where reference_type = 'trade' and entry_type = 'RELEASE'
+           and reference_id = (select id from public.trades where provider_trade_id = 'f-022-4')));
+  perform pg_temp.holds('022 a FILLED order has nothing to finalize',
+    public.finalize_venue_cancellation(o4, 'V-022-4', 'CANCELLED', 0.01) = 'TERMINAL');
+  perform pg_temp.holds('022 (9) a FILLED order cannot be cancelled by its owner', not public.cancel_order(u, o4));
+  perform pg_temp.rejects_matching('022 (9) FILLED → OPEN is refused',
+    format($q$ update public.trading_orders set status = 'OPEN' where id = %L $q$, o4), '23001', 'terminal');
+  perform pg_temp.rejects_matching('022 (9) FILLED → CANCELLED is refused',
+    format($q$ update public.trading_orders set status = 'CANCELLED' where id = %L $q$, o4), '23001', 'terminal');
+  perform pg_temp.rejects_matching('022 (9) FILLED → PARTIALLY_FILLED is refused',
+    format($q$ update public.trading_orders set status = 'PARTIALLY_FILLED' where id = %L $q$, o4), '23001', 'terminal');
+
+  -- (34) SELL: 0.5 BTC reserved; 0.2 fills @ 80,000 (16,000 quote, 32 fee); the venue expires the rest.
+  o5 := public.place_limit_order(u, pair, 'SELL', 80000, 0.5, btc, 0.5, '022-o5', 0);
+  perform public.claim_order_for_submission(u, o5);
+  perform public.record_provider_order_id(u, o5, 'V-022-5');
+  select available_balance into avail_before from public.wallets where user_id = u and asset_id = usdt;
+  perform public.apply_fill(o5, 'f-022-5', 0.2, 16000, 80000, 32, usdt, now());
+  select available_balance into avail_after from public.wallets where user_id = u and asset_id = usdt;
+  perform pg_temp.holds('022 (34) SELL: base delivered from the hold, proceeds net of the fee (15,968)',
+    avail_after - avail_before = 15968
+    and (select locked_amount = 0.3 and status = 'PARTIALLY_FILLED' from public.trading_orders where id = o5));
+  r := public.finalize_venue_cancellation(o5, 'V-022-5', 'EXPIRED', 0.2);
+  perform pg_temp.holds('022 (34) SELL: the venue expires it — exactly the 0.3 BTC remainder is released',
+    r = 'FINALIZED'
+    and (select amount = 0.3 from public.ledger_entries where reference_id = o5 and entry_type = 'RELEASE')
+    and (select status = 'CANCELLED' and filled_amount = 0.2 and locked_amount = 0 from public.trading_orders where id = o5));
+
+  -- ------------------------------------------------------------ accounting
+  perform pg_temp.holds('022 (32) no wallet of this user is negative',
+    not exists (select 1 from public.wallets where user_id = u and (available_balance < 0 or locked_balance < 0)));
+  perform pg_temp.holds('022 (32) nothing stays locked once every order ended',
+    (select coalesce(sum(locked_balance), 0) = 0 from public.wallets where user_id = u)
+    and not exists (select 1 from public.trading_orders
+                    where user_id = u and status not in ('CANCELLED', 'FILLED') and type = 'LIMIT'));
+  perform pg_temp.holds('022 (33) every ledger row is explained: a deposit, an order''s hold/release, or a fill',
+    not exists (
+      select 1 from public.ledger_entries l
+      where l.user_id = u
+        and not (l.entry_type = 'DEPOSIT' and l.reference_type = 'test')
+        and not (l.entry_type in ('HOLD', 'RELEASE') and l.reference_type = 'order'
+                 and l.reference_id in (select id from public.trading_orders where user_id = u))
+        and not (l.entry_type in ('TRADE', 'TRADE_FEE', 'RELEASE') and l.reference_type = 'trade'
+                 and l.reference_id in (select t.id from public.trades t join public.trading_orders o
+                                          on o.id in (t.buy_order_id, t.sell_order_id) where o.user_id = u))));
+  perform pg_temp.holds('022 (33) each order was released at most once',
+    not exists (select 1 from public.ledger_entries where user_id = u and reference_type = 'order' and entry_type = 'RELEASE'
+                group by reference_id having count(*) > 1));
+  perform pg_temp.holds('022 the user''s wallets reconcile with the ledger',
+    not exists (select 1 from public.reconcile_wallets() x where x.user_id = u));
+
+  -- (39) the release takes no amount: it releases what is locked.
+  perform pg_temp.holds('022 (39) finalize_venue_cancellation has no amount-to-release parameter',
+    (select proargnames from pg_proc where oid = 'public.finalize_venue_cancellation(uuid, text, text, numeric)'::regprocedure)
+    = array['p_order_id', 'p_provider_order_id', 'p_venue_status', 'p_venue_filled_amount']);
+end;
+$$;
+
+-- (36, 38, 40) As a signed-in customer: none of the lifecycle primitives, and no
+-- direct write that would bypass them. Frank owns the order being attacked.
+do $$ begin
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', '00000000-0000-4000-8000-00000000014b', 'role', 'authenticated')::text, true);
+end; $$;
+set local role authenticated;
+do $$
+begin
+  perform pg_temp.holds('022 (40) the customer can see their own order (the attacks below are not vacuous)',
+    exists (select 1 from public.trading_orders where client_order_id = '022-o4'));
+  perform pg_temp.rejects_with('022 (36) a customer cannot claim an order for submission',
+    $q$ select public.claim_order_for_submission('00000000-0000-4000-8000-00000000014b',
+          (select id from public.trading_orders where client_order_id = '022-o4')) $q$, '42501');
+  perform pg_temp.rejects_with('022 (36/38) a customer cannot record a venue order id',
+    $q$ select public.record_provider_order_id('00000000-0000-4000-8000-00000000014b',
+          (select id from public.trading_orders where client_order_id = '022-o4'), 'V-forged') $q$, '42501');
+  perform pg_temp.rejects_with('022 (36/39) a customer cannot release a reservation',
+    $q$ select public.finalize_venue_cancellation((select id from public.trading_orders where client_order_id = '022-o4'),
+          'V-022-4', 'CANCELLED', '0.01') $q$, '42501');
+  perform pg_temp.rejects_with('022 (36) a customer cannot apply a fill',
+    $q$ select public.apply_fill((select id from public.trading_orders where client_order_id = '022-o4'),
+          'f-forged', '0.001', '80', '80000', '0', null, now()) $q$, '42501');
+  perform pg_temp.no_effect('022 (38) a customer cannot set provider_order_id directly',
+    $q$ update public.trading_orders set provider_order_id = 'V-forged' where client_order_id = '022-o4' $q$,
+    $q$ select provider_order_id = 'V-022-4' from public.trading_orders where client_order_id = '022-o4' $q$);
+  perform pg_temp.no_effect('022 (40) a customer cannot move an order''s status directly',
+    $q$ update public.trading_orders set status = 'CANCELLED' where client_order_id = '022-o4' $q$,
+    $q$ select status = 'FILLED' from public.trading_orders where client_order_id = '022-o4' $q$);
+end;
+$$;
+reset role;
+do $$ begin perform set_config('request.jwt.claims', null, true); end; $$;
 
 -- -----------------------------------------------------------------------------
 -- EXECUTE: every function in public, called as every client role
@@ -1912,6 +2261,7 @@ declare
   pair uuid;
   t    text;
   fill_order uuid;
+  final_order uuid;
 begin
   insert into public.swap_quotes (user_id, from_asset_id, to_asset_id, from_amount,
                                   rate, fee, output_amount, rate_source, expires_at)
@@ -1929,6 +2279,12 @@ begin
   -- matrix, so it needs a live order to fill. Place a dedicated BUY reserving 5
   -- USDT; the matrix fill of 0.0001 @ 50000 completes it, then is rolled back.
   fill_order := public.place_limit_order(c, pair, 'BUY', 50000, 0.0001, usdt, 5, 'tst-exec-fill-order', 0);
+  perform public.claim_order_for_submission(c, fill_order);
+  perform public.record_provider_order_id(c, fill_order, 'tst-exec-venue-fill');
+  -- finalize_venue_cancellation (022) needs a submitted order the venue never
+  -- acknowledged; the matrix release is rolled back like every matrix call.
+  final_order := public.place_limit_order(c, pair, 'BUY', 50000, 0.0001, usdt, 5, 'tst-exec-final-order', 0);
+  perform public.claim_order_for_submission(c, final_order);
 
   -- Called by the server only (scripts/privilege-registry.ts names the caller).
   insert into function_calls (name, call, executors) values
@@ -1944,6 +2300,9 @@ begin
     ('place_limit_order', format($q$ select public.place_limit_order(%L, %L, 'BUY', '50000', '0.0001', %L, '5', 'tst-exec-order', '0') $q$, c, pair, usdt), '{service_role}'),
     ('cancel_order', format('select public.cancel_order(%L, %L)', c, gen_random_uuid()), '{service_role}'),
     ('apply_fill', format($q$ select public.apply_fill(%L, 'tst-exec-fill', '0.0001', '5', '50000', '0', null, now()) $q$, fill_order), '{service_role}'),
+    ('claim_order_for_submission', format('select public.claim_order_for_submission(%L, %L)', c, gen_random_uuid()), '{service_role}'),
+    ('record_provider_order_id', format($q$ select public.record_provider_order_id(%L, %L, 'tst-exec-venue') $q$, c, gen_random_uuid()), '{service_role}'),
+    ('finalize_venue_cancellation', format($q$ select public.finalize_venue_cancellation(%L, null, 'REJECTED', '0') $q$, final_order), '{service_role}'),
     -- They answer for auth.uid(). 017 keeps Supabase's default grant to
     -- service_role; 019 withdraws it, and no role is granted it instead.
     ('is_admin', 'select public.is_admin()',

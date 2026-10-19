@@ -5,10 +5,8 @@ import { toDecimalString, parseMoney, type DecimalString } from "../../money.ts"
 import {
   ExecutionError,
   dedupeFills,
-  mapExternalStatus,
   toErrorInfo,
   type ExecutionFill,
-  type ExternalOrderStatus,
   type OrderSide,
 } from "../types.ts";
 
@@ -31,24 +29,6 @@ const fill = (over: Partial<ExecutionFill> = {}): ExecutionFill => ({
   feeAsset: "USDT",
   executedAt: new Date("2026-01-01T00:00:00Z"),
   ...over,
-});
-
-describe("mapExternalStatus", () => {
-  const cases: [ExternalOrderStatus, string | null][] = [
-    ["ACCEPTED", "OPEN"],
-    ["OPEN", "OPEN"],
-    ["PARTIALLY_FILLED", "PARTIALLY_FILLED"],
-    ["FILLED", "FILLED"],
-    ["CANCELLED", "CANCELLED"],
-    ["REJECTED", "REJECTED"],
-    ["EXPIRED", "EXPIRED"],
-    ["UNKNOWN", null],
-  ];
-  for (const [external, internal] of cases) {
-    test(`${external} → ${internal ?? "null (reconcile)"}`, () => {
-      assert.equal(mapExternalStatus(external), internal);
-    });
-  }
 });
 
 describe("dedupeFills", () => {

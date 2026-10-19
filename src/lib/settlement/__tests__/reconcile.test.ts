@@ -6,7 +6,6 @@ import type { ExecutionFill, OrderSide } from "../../execution/types.ts";
 import {
   classifyApplyFillError,
   decideReconciliation,
-  deriveFillDelta,
   mapExecutionFillToApplyFill,
 } from "../types.ts";
 
@@ -86,18 +85,6 @@ describe("classifyApplyFillError — bounded, never leaks the raw message", () =
       if (c.error.message) assert.notEqual(result.message, c.error.message);
     });
   }
-});
-
-describe("deriveFillDelta — cumulative snapshot → unsettled delta", () => {
-  test("positive delta is the amount not yet settled", () => {
-    assert.equal(formatMoney(deriveFillDelta(parseMoney("0.70"), parseMoney("0.40"))), "0.3");
-  });
-  test("a fully-caught-up snapshot yields zero", () => {
-    assert.equal(formatMoney(deriveFillDelta(parseMoney("0.4"), parseMoney("0.4"))), "0");
-  });
-  test("a snapshot behind internal state never goes negative", () => {
-    assert.equal(formatMoney(deriveFillDelta(parseMoney("0.3"), parseMoney("0.4"))), "0");
-  });
 });
 
 describe("decideReconciliation", () => {

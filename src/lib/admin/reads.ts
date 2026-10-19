@@ -48,7 +48,7 @@ export async function getAdminStats(): Promise<AdminStats> {
   const [users, orders, openOrders, trades, deposits, withdrawals, pendingWithdrawals] = await Promise.all([
     toCount(admin.from("profiles").select("id", head)),
     toCount(admin.from("trading_orders").select("id", head)),
-    toCount(admin.from("trading_orders").select("id", head).in("status", ["PENDING", "OPEN", "PARTIALLY_FILLED"])),
+    toCount(admin.from("trading_orders").select("id", head).in("status", ["PENDING", "OPEN", "SUBMITTED", "PARTIALLY_FILLED"])),
     toCount(admin.from("trades").select("id", head)),
     toCount(admin.from("deposits").select("id", head)),
     toCount(admin.from("withdrawals").select("id", head)),

@@ -14,7 +14,7 @@ New statements carry a tag saying which source they rest on:
 | **[local]** | verified on throwaway local PostgreSQL clusters (17.10, with stand-ins for Supabase's roles and `auth` schema), or on a local build of the app |
 | **[local: libpq 16.15/17.10, Phase 3.3]** | observed with the libpq 16.15 and 17.10 client libraries, called directly with dummy values and without any network connection (Phase 3.3); says nothing about other libpq versions, the network or a server |
 | **[local: psql(1) man page 16.15]** | stated in the psql(1) manual page installed with PostgreSQL 16.15 where this was checked; the online PostgreSQL documentation could not be reached from there |
-| **[local: static analysis]** | read from the repository's files, the 20 migrations included, without running them |
+| **[local: static analysis]** | read from the repository's files, the 21 migrations included, without running them |
 | **[production, read-only]** | observed on the hosted project with read-only queries (Phase 2.4) |
 | **[docs]** | taken from Supabase's documentation as read in Phase 2.4; not tested here |
 | **[unverified]** | not established by any source available here; many items stay unknown until a separately authorized test project exists |
@@ -170,7 +170,7 @@ select current_setting('server_version') as server_version,
 
 Expected: PostgreSQL 17; connected as `postgres`; `auth_users` and `auth_uid` true; `client_roles` 3;
 `relations_in_public` 0. The migrations need no extension: `gen_random_uuid()` is part of PostgreSQL,
-and `scripts/test-db.sh` builds all 20 files (001–018, 020, 021) on a bare cluster with none installed **[local]**. 001 creates a
+and `scripts/test-db.sh` builds all 21 files (001–018, 020–022) on a bare cluster with none installed **[local]**. 001 creates a
 trigger on `auth.users`. Production has one trigger there **[production, read-only]**, but whether a new
 project accepts 001's is **[unverified]** until 001 runs there.
 
@@ -178,10 +178,10 @@ project accepts 001's is **[unverified]** until 001 runs there.
 
 | | What it is | Status |
 |---|---|---|
-| What the migrations expect | The migrations grant the client roles no table privilege themselves. Their only `GRANT`s are EXECUTE to `service_role`: on three functions in 017, on `place_limit_order` and `cancel_order` in 018, on `apply_fill` in 020 (021 grants nothing). Table access for `anon`, `authenticated` and `service_role` comes from `postgres`'s default privileges in `public`, and RLS policies narrow it | **[local]**: the repository; the local stand-in `supabase/tests/00_supabase_stubs.sql` sets those defaults itself, so every local result assumes them |
+| What the migrations expect | The migrations grant the client roles no table privilege themselves. Their only `GRANT`s are EXECUTE to `service_role`: on three functions in 017, on `place_limit_order` and `cancel_order` in 018, on `apply_fill` in 020, on `claim_order_for_submission`, `record_provider_order_id` and `finalize_venue_cancellation` in 022 (021 grants nothing). Table access for `anon`, `authenticated` and `service_role` comes from `postgres`'s default privileges in `public`, and RLS policies narrow it | **[local]**: the repository; the local stand-in `supabase/tests/00_supabase_stubs.sql` sets those defaults itself, so every local result assumes them |
 | The new project's defaults | whatever Supabase gives a project created now. Supabase says it is moving the platform default to revoke the automatic grants in `public` **[docs]** | **[unverified]**: the query above shows them |
 | Production's defaults | `postgres` in `public`: tables `arwdDxtm`, sequences `rwU`, functions `X`, each for `anon`, `authenticated` and `service_role`. `supabase_admin` in `public`: the same, for objects it creates (N3) | **[production, read-only]**, Phase 2.4; the project was created on 2026-10-10 |
-| What 019 and B2 would add | 019 narrows the client roles' table privileges, under its own authorization. B2 would change `postgres`'s own defaults (decision E). Neither is part of the 20 files | `docs/rollout-019.md`; applied nowhere hosted |
+| What 019 and B2 would add | 019 narrows the client roles' table privileges, under its own authorization. B2 would change `postgres`'s own defaults (decision E). Neither is part of the 21 files | `docs/rollout-019.md`; applied nowhere hosted |
 
 017 itself changes `postgres`'s default for functions to EXECUTE for the owner only **[local]**. After
 017 that row differs from production's by design; the comparison here is before 001.
@@ -205,7 +205,17 @@ Production has no `(all schemas)` row **[production, read-only]**.
   - accepting a test project whose privileges differ, and saying so in every result taken from it.
 - **`supabase_admin`'s rows are a different matter (N3).** On production they exist, and `postgres` cannot change them (`docs/rollout-019.md` §10). They apply only to objects `supabase_admin` creates, not to what the migrations create as `postgres`. Record whether the new project has them. Either way they do not block the install, but they must be named in any comparison with production. `postgres`'s own rows are the ones a project can change (B2).
 
-#### 3. Owner, separate go: apply 001–018, 020 and 021, fail-closed
+#### 3. Owner, separate go: apply 001–018 and 020–022, fail-closed
+
+**Which step.** Two different procedures bring a test project to 022. Never mix them:
+
+| The test project | Procedure | What runs |
+|---|---|---|
+| **Clean build:** new and empty (step 2's `relations_in_public` is 0) | this step 3 | 001–018 and 020–022, one file at a time |
+| **Existing Preview:** already has 001–021, installed by the previous, 20-file gate, with users and data | step 3b | the package `supabase/drafts/upgrade_021_022`: exactly 022, once, after checking the exact 021 state |
+
+**Preview upgrade procedure verified locally; Preview itself remains at 021.** Neither step has run on
+the Preview's test project in this repository's history beyond step 3 at 021 (Slice 12.8).
 
 The gate is a separate Bash script. The block below writes it to a new private file outside the
 repository, checks that file against the reviewed sha256, runs it with `bash` as a process of its own,
@@ -223,7 +233,7 @@ its `PG…` variables first (**Environment**, below). Then paste the whole block
 conn='host=<test project host> port=5432 dbname=postgres user=<user> sslmode=require'
 gate=$(command mktemp "${TMPDIR:-/tmp}/jimocex-gate.XXXXXXXXXX")
 command cat >| "$gate" <<'JIMOCEX_GATE'
-# JimoCex migration gate: applies supabase/migrations 001-018, 020, 021 to the test project, from a checked
+# JimoCex migration gate: applies supabase/migrations 001-018, 020-022 to the test project, from a checked
 # private copy. Run it only as docs/preview-environment.md (Option A, step 3) describes.
 set -u
 umask 077
@@ -277,6 +287,7 @@ approved=(
   018_order_placement.sql
   020_fill_settlement.sql
   021_enable_demo_trading.sql
+  022_submitted_lifecycle.sql
 )
 # The reviewed sha256 of each: "<file> <sha256>", in the same order. It adds nothing to what runs.
 manifest=(
@@ -300,6 +311,7 @@ manifest=(
   "018_order_placement.sql 8a08ab96f0be351b4dd47e74452196d9377080a0c0029ddf06ae71bcf782f49f"
   "020_fill_settlement.sql 76d856b38be503d2cbf612a69ca6264d8855d50d58a36a69bc9e476701cfff3a"
   "021_enable_demo_trading.sql e7b154ea7358959bdc1bbec99b25c838f83731567e3c792b74e67dd39577d2cc"
+  "022_submitted_lifecycle.sql 61d68773d53eb12798707f86b057c07715d55c730fb229e9db57e15bf71be0bb"
 )
 
 # True only for exactly 64 characters from 0-9 and a-f. An empty value never passes.
@@ -369,9 +381,9 @@ for tool in sha256sum mktemp cp rm psql; do
   type -P "$tool" >/dev/null || stop "$tool not found on PATH"
 done
 
-# 4. The lists: 20 approved files; manifest entry n is exactly "<approved file n> <sha256>".
-[ "${#approved[@]}" -eq 20 ] || stop "the approved list has ${#approved[@]} entries, not 20"
-[ "${#manifest[@]}" -eq 20 ] || stop "the manifest has ${#manifest[@]} entries, not 20"
+# 4. The lists: 21 approved files; manifest entry n is exactly "<approved file n> <sha256>".
+[ "${#approved[@]}" -eq 21 ] || stop "the approved list has ${#approved[@]} entries, not 21"
+[ "${#manifest[@]}" -eq 21 ] || stop "the manifest has ${#manifest[@]} entries, not 21"
 want=()
 for i in "${!approved[@]}"; do
   sum=${manifest[$i]#* }
@@ -384,7 +396,7 @@ done
 check_dir "$src"
 for i in "${!approved[@]}"; do check_file "$src/${approved[$i]}" "${want[$i]}"; done
 
-# 6. A private copy: a new directory (mode 0700), the 20 files copied without following
+# 6. A private copy: a new directory (mode 0700), the 21 files copied without following
 #    symlinks, then the same checks again on the copy.
 work=$(command mktemp -d "${TMPDIR:-/tmp}/jimocex-migrations.XXXXXXXXXX") || stop "could not create a temporary directory"
 { [ -d "$work" ] && [ ! -L "$work" ] && [ -O "$work" ]; } || stop "not a private directory: $work"
@@ -408,9 +420,9 @@ for name in "${approved[@]}"; do
     exit "$rc"
   fi
 done
-echo "All 20 files ran. The schema is NOT verified until the read-only checks of step 5 pass."
+echo "All 21 files ran. The schema is NOT verified until the read-only checks of step 5 pass."
 JIMOCEX_GATE
-{ if [ -n "$gate" ] && [ "$(command sha256sum < "$gate")" = "a6178a03e4baa5b6f448a363e0ef6ec2cd334afbc7102e8408ab6521bf4ed284  -" ]; then
+{ if [ -n "$gate" ] && [ "$(command sha256sum < "$gate")" = "9986c6c886bfe8cea497edd00f4c81bf72e4bc4c2b90269f0a7084f9c1168ce8  -" ]; then
     BASH_ENV= command bash "$gate" "$conn"; status=$?
   else
     echo "STOP: the gate file is missing or is not the reviewed text. Nothing was run." >&2; status=10
@@ -423,22 +435,22 @@ JIMOCEX_GATE
 - **Trusted environment.** Run this gate, and steps 2 and 5, only in a controlled environment with a trusted toolchain. The gate finds every external command it runs — `bash`, `sha256sum`, `mktemp`, `cp`, `rm`, `psql`, and in step 5 `git`, `mv` and `node` — through `PATH`, and it does not prove any of them is genuine; `command` only keeps your shell's aliases and functions away, not a program planted earlier on `PATH`. A substituted `node`, `git`, `psql`, `sha256sum` or `bash` can make a step report success while doing nothing of the kind, or run altered code: for example a `node` ahead on `PATH` that merely exits 0 makes step 5 print `RESULT` though no checker ran **[local, Phase 3.17/3.18]**. Printing a resolved path (`command -v node`) or a tool's version can help you confirm your own environment, but a hostile program answers those the same way a real one would, so neither proves authenticity — and neither does pinning an absolute path, which a compromised system can still redirect. Treat the gate as sound only on a machine you trust, with the real tools first on `PATH`; it is **not** safe against a hostile `PATH`, a compromised system or an untrusted toolchain, and nothing in the document can make it so. This is a precondition on your shell, not a guarantee the gate provides.
 - **Where and how.** From the repository root, in the foreground of a terminal: not in the background (`&`), not under `nohup` or `setsid`. Bash cannot trap a signal that was already ignored when it started, so such a run would not stop on that signal. `BASH_ENV=` keeps a startup file from running before the gate; `command` keeps shell aliases and functions out.
 - **The connection** is the gate's first argument, taken from `conn` in the first line. The gate accepts one form only: `host=`, `port=`, `dbname=`, `user=` and `sslmode=`, each exactly once, as `key=value` pairs separated by spaces, the values made of letters, digits, `.`, `_` and `-`. This is a deliberately narrow subset of libpq's connection strings, not a general one. It refuses, with exit 10 and without printing the value: an empty connection; one starting with `-`; a URI (`://`); `password` in any spelling; any other character (quotes, tabs, line breaks, `,`, `:`, `<` …, so also a placeholder left in the first line); a key that is missing, repeated or not one of the five (`hostaddr`, `service`, `options` …); an empty value, or one containing `=`. So the connection names exactly one host. `psql` receives it as the value of its `-d` option, which accepts a connection string **[local: psql(1) man page 16.15]**. Every other argument the gate passes is an option or an option's value (`-X -q -1 -v ON_ERROR_STOP=1 … -f <checked copy>`), and there is no positional argument; the man page's synopsis is `psql [option...] [dbname [username]]` **[local: psql(1) man page 16.15]**. A connection starting with `-` is refused before any `psql` call.
-- **Environment.** `psql` inherits the exported variables of the shell the block is pasted into. `compgen -e | grep '^PG'` lists their names, not their values. The gate checks only its own environment, which its `psql` calls inherit: this covers the 20 `psql` calls of this step and no other command. The libpq observations below were made with the two libpq versions named and are not claimed for other versions. The gate treats the variables as follows:
+- **Environment.** `psql` inherits the exported variables of the shell the block is pasted into. `compgen -e | grep '^PG'` lists their names, not their values. The gate checks only its own environment, which its `psql` calls inherit: this covers the 21 `psql` calls of this step and no other command. The libpq observations below were made with the two libpq versions named and are not claimed for other versions. The gate treats the variables as follows:
   - *Refused* (exit 10; the name is printed, never the value) when not empty:
     - `PGHOSTADDR`: with `host=` given, libpq still used this address for the connection **[local: libpq 16.15/17.10, Phase 3.3]**.
     - `PGSERVICE`: libpq took `hostaddr` and `options` from the named entry of the service file, while the connection's five keys kept their values **[local: libpq 16.15/17.10, Phase 3.3]**.
     - `PGSERVICEFILE`: it names the service file. Without a service name, no effect of it was observed **[local: libpq 16.15/17.10, Phase 3.3]**. Refusing it is a conservative limit, not evidence that it redirects a connection.
     - `PGOPTIONS`: libpq passes it on as the connection's `options` **[local: libpq 16.15/17.10, Phase 3.3]**; that the server applies it as settings for the session is **[unverified]**.
-  - *Overridden.* `PGHOST`, `PGPORT`, `PGDATABASE` and `PGUSER` are default connection parameters **[local: psql(1) man page 16.15]**. With all five keys in the connection, libpq kept the connection's values over these four and over `PGSSLMODE` **[local: libpq 16.15/17.10, Phase 3.3]**. The client encoding: every `psql` of the gate runs with `PGCLIENTENCODING=UTF8`, which also replaces the encoding `psql` would otherwise take from the terminal's locale **[local: psql(1) man page 16.15]**. The 20 files are valid UTF-8. 19 hold non-ASCII characters in comments (021 is plain ASCII); 15 of 001–017 also in string literals or function bodies that the database stores, and 018 and 020 in one comment line each inside a stored function body (`—`, `§`) **[local: static analysis]**. What the server would make of these bytes under another client encoding is **[unverified]**. For the database's own encoding, see **Database encoding** below.
-  - *Not checked:* every other `PG…` name the command lists. Unset it (`unset NAME`) unless you know why it is set. `PGPASSWORD` above all: libpq takes the password from it without asking **[local: libpq 16.15/17.10, Phase 3.3]**, which breaks the **Password** rule below. With the others set at once (`PGPASSWORD`, `PGPASSFILE`, `PGCHANNELBINDING`, `PGREQUIREAUTH`, `PGREQUIREPEER`, the `PGSSL…` variables, `PGGSSENCMODE`, `PGGSSDELEGATION`, `PGKRBSRVNAME`, `PGTARGETSESSIONATTRS`, `PGLOADBALANCEHOSTS`, `PGCONNECT_TIMEOUT`, `PGAPPNAME`, `PGSYSCONFDIR`, `PGLOCALEDIR`, `PGTZ`, `PGDATESTYLE`, `PGGEQO`), libpq still passed on the connection's host, port, database, user and `sslmode`, with no `hostaddr` and no `options` **[local: libpq 16.15/17.10, Phase 3.3]**. That covers the parameters libpq passes on, not authentication, encryption or the network: what each of these variables changes there is **[unverified]**. `PGTZ`, `PGDATESTYLE` and `PGGEQO` would set session settings **[unverified]**; no statement of the 20 files depends on them while the files run: they hold no date or timestamp literals, no `timestamp` without time zone and no date conversions **[local: static analysis]**.
+  - *Overridden.* `PGHOST`, `PGPORT`, `PGDATABASE` and `PGUSER` are default connection parameters **[local: psql(1) man page 16.15]**. With all five keys in the connection, libpq kept the connection's values over these four and over `PGSSLMODE` **[local: libpq 16.15/17.10, Phase 3.3]**. The client encoding: every `psql` of the gate runs with `PGCLIENTENCODING=UTF8`, which also replaces the encoding `psql` would otherwise take from the terminal's locale **[local: psql(1) man page 16.15]**. The 21 files are valid UTF-8. 20 hold non-ASCII characters in comments (021 is plain ASCII); 15 of 001–017 also in string literals or function bodies that the database stores, 018 and 020 in one comment line each inside a stored function body (`—`, `§`), and 022 in two such lines (`—`, `§`; its other non-ASCII characters are in comments outside any body) **[local: static analysis]**. What the server would make of these bytes under another client encoding is **[unverified]**. For the database's own encoding, see **Database encoding** below.
+  - *Not checked:* every other `PG…` name the command lists. Unset it (`unset NAME`) unless you know why it is set. `PGPASSWORD` above all: libpq takes the password from it without asking **[local: libpq 16.15/17.10, Phase 3.3]**, which breaks the **Password** rule below. With the others set at once (`PGPASSWORD`, `PGPASSFILE`, `PGCHANNELBINDING`, `PGREQUIREAUTH`, `PGREQUIREPEER`, the `PGSSL…` variables, `PGGSSENCMODE`, `PGGSSDELEGATION`, `PGKRBSRVNAME`, `PGTARGETSESSIONATTRS`, `PGLOADBALANCEHOSTS`, `PGCONNECT_TIMEOUT`, `PGAPPNAME`, `PGSYSCONFDIR`, `PGLOCALEDIR`, `PGTZ`, `PGDATESTYLE`, `PGGEQO`), libpq still passed on the connection's host, port, database, user and `sslmode`, with no `hostaddr` and no `options` **[local: libpq 16.15/17.10, Phase 3.3]**. That covers the parameters libpq passes on, not authentication, encryption or the network: what each of these variables changes there is **[unverified]**. `PGTZ`, `PGDATESTYLE` and `PGGEQO` would set session settings **[unverified]**; no statement of the 21 files depends on them while the files run: they hold no date or timestamp literals, no `timestamp` without time zone and no date conversions **[local: static analysis]**.
 - **Before the first `psql` call**, in this order. Any failure exits 10, and nothing is applied:
   1. the gate file is the reviewed text (the sha256 in the block);
   2. the connection has the one accepted form (**The connection**);
   3. `PGHOSTADDR`, `PGSERVICE`, `PGSERVICEFILE` and `PGOPTIONS` are empty (**Environment**);
   4. `sha256sum`, `mktemp`, `cp`, `rm` and `psql` are on `PATH`;
-  5. the approved list has 20 files, and manifest entry *n* is exactly `<approved file n> <sha256>`. The manifest only supplies hashes: it cannot add, remove or reorder what runs;
+  5. the approved list has 21 files, and manifest entry *n* is exactly `<approved file n> <sha256>`. The manifest only supplies hashes: it cannot add, remove or reorder what runs;
   6. `supabase/migrations` is a real directory holding the approved files and nothing else (hidden entries, subdirectories and symlinks are refused), each a regular file with its reviewed sha256;
-  7. `mktemp -d` creates a new private directory (mode 0700, owned by you), the 20 files are copied into it without following symlinks, and the copy passes the same checks again.
+  7. `mktemp -d` creates a new private directory (mode 0700, owned by you), the 21 files are copied into it without following symlinks, and the copy passes the same checks again.
 
   A sha256 passes only if the expected and the computed value are both exactly 64 characters from `0-9a-f`, and equal. A missing or failing `sha256sum`, empty output, output in another form, or a damaged manifest entry is a refusal, never a pass.
 - **While applying.** Each file runs as `PGCLIENTENCODING=UTF8 psql -X -q -1 -v ON_ERROR_STOP=1 -d <connection> -f <checked copy>`. Every `psql` call reads the checked copy, never the working tree: an edit, a checkout or a pull in the working tree during the run changes nothing that runs. On the first `psql` that does not exit 0, the sequence stops, runs no later file and exits with `psql`'s code. It retries nothing, and uses no `break` and no pipeline whose status could hide a failure.
@@ -463,7 +475,8 @@ JIMOCEX_GATE
 - **Changing what runs.** The script, its two lists and its sha256 in the block are part of this reviewed document. Never edit them to get past a refusal: a new or changed migration needs a reviewed update of this document, including a new sha256 of the script.
 - **Password.** Never on the command line, in `conn` or in the script. psql asks for it at each file, or reads it from `~/.pgpass` (mode `0600`), removed afterwards.
 - **Connection.** `<test project host>` and `<user>` come from the test project's Connect dialog, for its direct connection or its session pooler. These are the two connections that the header of `supabase/drafts/v4/apply_016_017.sql` names ("direct or session-pooler connection"); package v4's `README.md` names none. That both use port 5432, as the template's `port=5432` assumes, is **[unverified]**: if the dialog shows another port for the connection you use, stop and have this document reviewed. How either connection behaves with this sequence is **[unverified]**.
-- **Not proof.** "All 20 files ran" says each `psql` exited 0. Whether the schema is right is decided by step 5.
+- **Not proof.** "All 21 files ran" says each `psql` exited 0. Whether the schema is right is decided by step 5.
+- **A project that already has 001–021.** This step installs into an empty project only. On a database built by the previous, 20-file gate, it stops at 001, whose objects exist, with exit status 3, and changes nothing **[local, Slice 14C]**. It cannot add 022 on its own. Such a project gets 022 through step 3b only, with the owner's go. Step 4 shows why no file is simply run again there.
 - **Checked so far.** Only the control flow, with a stand-in for `psql` and stand-ins for failing tools; never against a database, and with Bash 5.2 only. The block was pasted into an interactive Bash in a pseudo-terminal. Phase 3.0 checked the previous version of the gate, whose signal handling and clean-up this version keeps unchanged:
   - Normal runs: success, and `psql` failing at 001, 009 and 017, ended with 0, 3, 2 and 1, with no later file run.
   - `INT`, `TERM` and `HUP`, sent while `psql` ran to the gate alone, to its process group, or as Ctrl-C, stopped the sequence at that file with 130, 143 or 129. This includes a `psql` that caught `INT` and exited 0.
@@ -493,12 +506,387 @@ JIMOCEX_GATE
   - The gate itself: `psql` failing at 018 stopped after 18 calls, at 021 after 20, each with 3; an extra
     file (`022_extra.sql`), a hidden entry, an altered 021 and a missing 020 each ended with 10 and no `psql` call.
 
+  Slice 14C changed only the two lists (022 added, with its sha256
+  `61d68773d53eb12798707f86b057c07715d55c730fb229e9db57e15bf71be0bb`), the counts from 20 to 21, the header
+  comment and the final message. `diff` of the two scripts shows nothing else, and the new script's sha256
+  is pinned in the block. Control flow, connection and environment checks, signal handling and clean-up
+  are unchanged. Re-checked with Bash 5.2, not interactively and without signals **[local]**.
+
+  With a stand-in for `psql`, on copies of the repository:
+  - The previous gate refused this tree before any `psql` call (exit 10, `unexpected entry in
+    supabase/migrations: 022_submitted_lifecycle.sql`).
+  - The whole block, placeholders filled:
+    - the gate file matched the pinned sha256;
+    - all 21 files ran in the approved order, each with the same options and `PGCLIENTENCODING=UTF8`;
+    - it printed `exit status: 0`, and nothing was left in `TMPDIR`.
+
+    The block refused with 10 and ran nothing when it carried the previous script under the new pin, and
+    when a placeholder was left in it.
+  - Each of these ended with 10 and no `psql` call:
+    - in the tree: 022 missing, appended to, changed by one byte, given a CRLF line ending or replaced by
+      a symlink; 021 altered or missing; an extra `023_extra.sql`; a second 022 file (`022_duplicate.sql`);
+      022 renamed to 023 or to 019; a hidden entry; a subdirectory;
+    - in copies of the script: 022's manifest hash changed by one digit, shortened or in capitals; 021 and
+      022 swapped in either list; 022 listed twice; 022 dropped from both lists.
+  - `psql` failing at 021 stopped after 20 calls, with no 022 call; failing at 022, after 21. Each ended
+    with 3.
+
+  With the real `psql` 16.15, on throwaway local PostgreSQL 16.15 and 17.10 clusters:
+  - The clusters had this repository's stand-ins for Supabase's roles and `auth` schema. The connection
+    was over TCP to 127.0.0.1, in the accepted form with `sslmode=disable`, and the whole block ran from
+    the repository root. Both versions gave the same results.
+  - On an empty database:
+    - `exit status: 0`; all 21 files applied, one transaction each (022's `ALTER TYPE … ADD VALUE`
+      included); nothing left in `TMPDIR`;
+    - both step 5 checkers matched the catalog (step 5, Locally);
+    - `supabase/tests/01_invariants.sql` passed 464 of 464;
+    - the catalog (388 definitions and privileges) and the row counts equal those of a database built
+      the way `scripts/test-db.sh` builds one.
+  - On a database at 021, built by the previous 20-file gate: the 21-file gate stopped at 001 (`type
+    "asset_type" already exists`, exit 3), and that database's catalog and every row were unchanged.
+
 Not part of this step:
 - **Package v4** (`supabase/drafts/v4/apply_016_017.sql`) is for the hosted project only. It is built for production's exact 015 state, refuses anything else and writes production's history rows. It is never the way to install a new project.
-- **019** (`supabase/drafts/019_table_privileges.sql`) is not part of the 20 files. Only if the owner decides, under its own authorization, after `sha256sum -c` (as `npm run test:db:019` does locally).
+- **019** (`supabase/drafts/019_table_privileges.sql`) is not part of the 21 files. Only if the owner decides, under its own authorization, after `sha256sum -c` (as `npm run test:db:019` does locally).
 - **History rows.** The sequence writes none to `supabase_migrations.schema_migrations`. Writing them is DML and needs its own decision.
 - **Reference data** comes from the migrations (011, 015, and 021's three trading flags). Nothing is copied from production.
 - **Demo trading.** 021 enables LIMIT orders on BTC-USDT, ETH-USDT and SOL-USDT only; the other 13 pairs stay disabled, no pair swaps, and no execution provider is connected, so an order is reserved and can be cancelled but never fills, and nothing is settled. A demo balance is a separate step (step 7).
+
+#### 3b. Owner, separate go: upgrade an existing test project from 021 to 022
+
+**Preview upgrade procedure verified locally; Preview itself remains at 021.** This block has never run
+against the Preview's test project or any hosted database. **Review this block and the package before
+it runs there.** Passing every check authorizes nothing: applying needs the owner's separate go.
+
+This step is for a test project that already has 001–021 (**Which step**, step 3) and must keep its
+users and data. It applies exactly one migration, 022, from the package `supabase/drafts/upgrade_021_022`
+(its `README.md` has the identity, the checks and the tests).
+
+It does **not**:
+- run 001–021 again;
+- drop, truncate or recreate anything;
+- write migration history;
+- change or repair a row.
+
+**Two runs, two modes.** The first line of the block is the connection, in the same form as step 3's.
+The second line is the mode:
+
+1. **`mode=check`**, always first, and as often as wanted. It is read-only: one `SELECT` of
+   `checks.sql`, in a read-only transaction. It prints each check with `t` or `f` and ends with
+   `READY` (exit status 0) or `BLOCKED` (11). It changes nothing either way.
+2. **`mode=apply`**, only with the owner's go, after a `READY` check (and after **Before applying**,
+   below). It runs the same check again, then `apply.sql`, then the check again. It ends with `PASS`
+   (0) only when the database is what 022 defines.
+
+```bash
+conn='host=<test project host> port=5432 dbname=postgres user=<user> sslmode=require'
+mode=check
+gate=$(command mktemp "${TMPDIR:-/tmp}/jimocex-upgrade-gate.XXXXXXXXXX")
+command cat >| "$gate" <<'JIMOCEX_UPGRADE'
+# JimoCex upgrade gate 021 -> 022: checks, read-only, that a database is exactly the 021 state, and
+# with mode apply upgrades it to 022 once, from a checked private copy of supabase/drafts/upgrade_021_022.
+# Run it only as docs/preview-environment.md (Option A, step 3b) describes.
+set -u
+umask 077
+shopt -s nullglob dotglob
+conn=${1:-}
+mode=${2:-}
+src=supabase/drafts/upgrade_021_022
+work=
+
+# A refusal before the first psql call: nothing was read or changed. Exit status 10.
+stop() { echo "STOP: $*" >&2; echo "Nothing was applied. Do not edit this script to get past a refusal." >&2; exit 10; }
+# On every exit, also after HUP, INT or TERM: keep the exit status, then remove the private copy.
+# HUP, INT and TERM are ignored from here on, and rm inherits that, so a repeated signal can neither
+# interrupt the removal nor replace the saved status.
+cleanup() {
+  rc=$?
+  trap '' HUP INT TERM
+  trap - EXIT
+  case $work in
+    */jimocex-upgrade.*)
+      if [ -d "$work" ] && [ ! -L "$work" ] && [ -O "$work" ]; then
+        command rm -rf -- "$work" || echo "WARNING: could not remove $work. Delete it by hand." >&2
+      fi ;;
+  esac
+  exit "$rc"
+}
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+echo "upgrade gate running as pid $$; stop it with Ctrl-C or: kill -INT $$"
+
+# The package's two files and their reviewed sha256: "<file> <sha256>", in the same order.
+files=(checks.sql apply.sql)
+manifest=(
+  "checks.sql d809cf81f2b46a1eb02aa77c3f3beb18f501e69e33b60dfba0d99e27837cf0cb"
+  "apply.sql 1145a613375f23960a725a74ab7982cd22bee2861e82beef0c8199ac34bb1abd"
+)
+
+# True only for exactly 64 characters from 0-9 and a-f. An empty value never passes.
+is_sha256() { case $1 in *[!0123456789abcdef]*) return 1 ;; esac; [ "${#1}" -eq 64 ]; }
+# Prints the sha256 of one file. Fails if sha256sum fails or prints anything but "<sha256>  -".
+sha256_of() {
+  out=$(command sha256sum < "$1") || return 1
+  sum=${out%% *}
+  { [ "$out" = "$sum  -" ] && is_sha256 "$sum"; } || return 1
+  printf '%s\n' "$sum"
+}
+# $1 must be a regular file, not a symlink, whose sha256 is $2.
+check_file() {
+  { [ -f "$1" ] && [ ! -L "$1" ]; } || stop "missing, or not a regular file: $1"
+  got=$(sha256_of "$1") || stop "could not compute the sha256 of $1"
+  [ "$got" = "$2" ] || stop "$1 is not the reviewed text"
+}
+# 0. The mode: check (read-only; always first) or apply (only with the owner's go, after a check).
+case $mode in
+  check|apply) ;;
+  *) stop "the mode must be check or apply, not '$mode'" ;;
+esac
+
+# 1. The connection: the first argument, in the one form this step supports: host=, port=, dbname=,
+#    user= and sslmode=, each exactly once, as key=value pairs separated by spaces, the values made of
+#    letters, digits, '.', '_' and '-'. Anything else is refused. The value itself is never printed.
+case $conn in
+  *[!\ ]*) ;;
+  *) stop "no connection given: pass the test project's connection as the first argument" ;;
+esac
+case $conn in
+  -*) stop "the connection must not start with '-'" ;;
+  *://*) stop "give the connection as key=value pairs (host=... user=...), not as a URI" ;;
+  *[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]*) stop "the connection must not contain a password" ;;
+  *[!abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._=\ -]*)
+    stop "the connection may contain only letters, digits, '.', '_', '-', '=' and spaces (is a <placeholder> left in it?)" ;;
+esac
+IFS=' ' read -r -a pairs <<< "$conn"
+seen=' '
+for pair in "${pairs[@]}"; do
+  case $pair in
+    *=*=*) stop "a value in the connection must not contain '='" ;;
+    host=?*|port=?*|dbname=?*|user=?*|sslmode=?*) ;;
+    *) stop "the connection may give only host=, port=, dbname=, user= and sslmode=, each with a value" ;;
+  esac
+  key=${pair%%=*}
+  case $seen in *" $key "*) stop "the connection gives $key= more than once" ;; esac
+  seen="$seen$key "
+done
+for key in host port dbname user sslmode; do
+  case $seen in *" $key "*) ;; *) stop "the connection does not give $key=" ;; esac
+done
+
+# 2. The environment. Set, these would let libpq connect elsewhere than host= says (PGHOSTADDR), fill in
+#    parameters from a service file (PGSERVICE, PGSERVICEFILE), or change the session's server settings
+#    (PGOPTIONS). They must be empty. Only the name is printed, never the value.
+for var in PGHOSTADDR PGSERVICE PGSERVICEFILE PGOPTIONS; do
+  [ -z "${!var:-}" ] || stop "$var is set in the environment: unset it in this shell, then paste the block again"
+done
+
+# 3. The tools are on PATH. `command` below ignores shell aliases and functions of the same name.
+for tool in sha256sum mktemp cp rm grep psql; do
+  type -P "$tool" >/dev/null || stop "$tool not found on PATH"
+done
+
+# 4. The lists: 2 files; manifest entry n is exactly "<file n> <sha256>".
+[ "${#files[@]}" -eq 2 ] || stop "the file list has ${#files[@]} entries, not 2"
+[ "${#manifest[@]}" -eq 2 ] || stop "the manifest has ${#manifest[@]} entries, not 2"
+want=()
+for i in "${!files[@]}"; do
+  sum=${manifest[$i]#* }
+  { [ "${manifest[$i]}" = "${files[$i]} $sum" ] && is_sha256 "$sum"; } \
+    || stop "manifest entry $((i + 1)) is not '${files[$i]} <64 characters 0-9a-f>'"
+  want+=("$sum")
+done
+
+# 5. The working tree: each file a regular file, not a symlink, with its reviewed sha256.
+{ [ -d "$src" ] && [ ! -L "$src" ]; } || stop "$src is not a directory here; run this from the repository root"
+for i in "${!files[@]}"; do check_file "$src/${files[$i]}" "${want[$i]}"; done
+
+# 6. A private copy: a new directory (mode 0700), the 2 files copied without following symlinks,
+#    then the same checks again on the copy.
+work=$(command mktemp -d "${TMPDIR:-/tmp}/jimocex-upgrade.XXXXXXXXXX") || stop "could not create a temporary directory"
+{ [ -d "$work" ] && [ ! -L "$work" ] && [ -O "$work" ]; } || stop "not a private directory: $work"
+for name in "${files[@]}"; do
+  command cp -P -- "$src/$name" "$work/$name" || stop "could not copy $name"
+done
+for i in "${!files[@]}"; do check_file "$work/${files[$i]}" "${want[$i]}"; done
+
+# 7. The check, in a read-only transaction. It must say READY: exactly the 021 state, 022 absent,
+#    consistent money. Otherwise exit status 11, and nothing was changed. It prints the check rows
+#    (phases pre and post), not the per-table rows (phase data).
+checks() {
+  PGCLIENTENCODING=UTF8 command psql -X -q -At -1 -v ON_ERROR_STOP=1 -d "$conn" \
+    -c 'set transaction read only' -f "$work/checks.sql" >| "$work/$1.txt"
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "STOP: the read-only check did not run to the end: psql exited $rc. It changes nothing." >&2
+    exit "$rc"
+  fi
+  command grep -E '^(pre|post)[|]' "$work/$1.txt"
+}
+echo "check (read-only):"
+checks before
+if ! command grep -qx 'pre|P99|VERDICT|t|READY' "$work/before.txt"; then
+  echo "BLOCKED: this database is not the 021 state the package upgrades (rows with f above). Nothing was changed." >&2
+  echo "Do not change the database to get past the check: have the state reviewed (step 3b, If the check is BLOCKED)." >&2
+  exit 11
+fi
+if [ "$mode" = check ]; then
+  echo "READY: the database is the 021 state. Nothing was changed. Applying needs mode apply and the owner's go."
+  exit 0
+fi
+
+# 8. Apply. apply.sql is ONE statement: PostgreSQL applies all of it or nothing.
+echo "applying apply.sql"
+PGCLIENTENCODING=UTF8 command psql -X -q -v ON_ERROR_STOP=1 -d "$conn" -f "$work/apply.sql"
+rc=$?
+if [ "$rc" -eq 3 ]; then
+  echo "STOP: apply.sql was refused or failed (psql exited 3). It is one statement: nothing was changed." >&2
+  echo "Keep the error text. Do not edit or re-run anything; have it reviewed." >&2
+  exit 3
+elif [ "$rc" -ne 0 ]; then
+  echo "STOP: psql exited $rc. Whether apply.sql committed is unknown: a lost connection hides it." >&2
+  echo "Run this block again with mode=check. READY: nothing was applied. BLOCKED together with" >&2
+  echo "post|Q99|VERDICT|t|PASS: it was applied. Never apply again before that check." >&2
+  exit "$rc"
+fi
+
+# 9. The check again, read-only. It must say PASS: what 022 defines, with consistent money. Otherwise 12.
+echo "check after the upgrade (read-only):"
+checks after
+if ! command grep -qx 'post|Q99|VERDICT|t|PASS' "$work/after.txt"; then
+  echo "STOP: apply.sql reported success, but the check does not say PASS. Have it reviewed; run nothing else." >&2
+  exit 12
+fi
+echo "PASS: the database is at 022. Finish with step 5, run from a commit that has 022's registries."
+JIMOCEX_UPGRADE
+{ if [ -n "$gate" ] && [ "$(command sha256sum < "$gate")" = "81f82d65beb0a28b64f39ecb69f9651fa9ad19bc50a7527cce2d074d0b036b61  -" ]; then
+    BASH_ENV= command bash "$gate" "$conn" "$mode"; status=$?
+  else
+    echo "STOP: the gate file is missing or is not the reviewed text. Nothing was run." >&2; status=10
+  fi
+  command rm -f -- "$gate"; echo "exit status: $status"; (exit "$status"); }
+```
+
+**Before applying** (operator):
+- **Backup.** In the test project's dashboard, confirm that a backup newer than the last change to the
+  project exists, and note its time. Which backups the test project's plan provides is **[unverified]**.
+  Restoring that backup is the only complete rollback, and it also discards everything written after it
+  (**Rollback**, below).
+- **A quiet window.** No one uses the Preview's app while it runs. `apply.sql` locks every table in
+  `public` against writes for the length of its one statement: about 0.2 s locally. If it has to wait
+  more than 5 s for a lock, it gives up and changes nothing.
+- **The same conditions as step 3:**
+  - a trusted machine;
+  - `PG…` variables checked;
+  - the connection in the accepted form, naming the test project and never production (step 3,
+    **What it does not check: the database**);
+  - the database UTF-8.
+- **The package is the reviewed one.** The block refuses any other text of `checks.sql` or `apply.sql`
+  (sha256, as for step 3). The package's `README.md` also shows how to check that `apply.sql` embeds the
+  repository's 022 and `checks.sql`.
+
+**What the block does,** after the same checks as step 3 on its connection, environment and tools:
+1. It checks the two files against their reviewed sha256 and copies them into a new private directory,
+   then checks the copies. Every later `psql` call reads the copies.
+2. **Check.** `psql -X -q -At -1 -v ON_ERROR_STOP=1 -d <connection> -c 'set transaction read only' -f
+   checks.sql`. It must print `pre|P99|VERDICT|t|READY`, otherwise BLOCKED, exit 11. The `pre` checks
+   are listed in the package's `README.md`:
+   - role, server and session;
+   - no foreign migration history;
+   - 022 absent, 021's flags set;
+   - the schema of a clean 001–021 build;
+   - the functions 022 replaces, as they were;
+   - no order 022 would strand;
+   - no venue order id;
+   - consistent money.
+3. **Apply** (mode `apply` only). `psql -X -q -v ON_ERROR_STOP=1 -d <connection> -f apply.sql`.
+   `apply.sql` is one statement, so all of it or nothing happens. Inside it:
+   - it locks every table in `public`;
+   - it repeats the `pre` checks;
+   - it snapshots every table's rows;
+   - it executes 022;
+   - it runs the `post` checks;
+   - it compares every table's rows with the snapshot.
+   Any difference or failed check raises an error, and nothing is applied.
+4. **Check again.** The same read-only query must print `post|Q99|VERDICT|t|PASS`, otherwise exit 12.
+
+**Exit status**, printed as `exit status: N` and returned by the block:
+- **0:** with `check`, READY; with `apply`, PASS.
+- **10:** refused before any `psql` call (connection, environment, tools, mode, or files not the
+  reviewed text); nothing was read or changed.
+- **11:** BLOCKED; nothing was changed.
+- **3:** `apply.sql` was refused or failed (its error text says which check); nothing was changed.
+- **2, or another `psql` code during apply:** whether `apply.sql` committed is unknown. Run the block
+  again with `mode=check`:
+  - READY means nothing was applied;
+  - BLOCKED together with `post|Q99|VERDICT|t|PASS` means it was.
+
+  Never apply again before that check.
+- **12:** `apply.sql` reported success but the check does not say PASS. Stop and have it reviewed.
+
+**If the check is BLOCKED,** the rows with `f` say why. **Do not change the database to get past it,**
+and do not edit the package or the block:
+- **P01 or P02** (wrong role, server or session): correct the connection, not the database.
+- **P03, P04, P05, P07 or P08:** the project is not the 021 state this package was built for. Examples:
+  history from another mechanism, 022 already there, or a schema that differs, possibly only on the
+  hosted platform (`differing:` names the categories). Stop: a new package needs its own review.
+- **P06** (021's trading flags not set): the trading flags were changed after 021. That needs its own
+  decision before any upgrade.
+- **P09, P10 or M1–M5:** orders or money that 022 would strand or that do not add up, for example a
+  `PENDING` or `PARTIALLY_FILLED` order, a recorded venue order id, a lock without its ledger rows, or a
+  wallet that differs from its ledger. Each needs its own reviewed decision, never an automatic repair.
+
+**After PASS.**
+- Run step 5 with profile 017. Its block checks the committed registries, so run it from a commit that
+  contains 022's registries (Slice 14B); with an earlier commit, both checkers report the three 022 functions as not in their registries
+  **[local, Slice 14D: HEAD `11814cf`'s checkers against a 001–022 database]**.
+- A database at 021 checked against 022's registries reports the same three functions missing
+  **[local, Slice 14C]**.
+
+**Rollback.** There is no down-migration and no reviewed reverse procedure:
+- PostgreSQL cannot remove an enum value, so `SUBMITTED` stays.
+- Re-running 018 or 020 would silently put back their `cancel_order` and `apply_fill` (step 4). That is
+  not a rollback: `SUBMITTED` and the three new functions would stay, next to functions that no longer
+  match them.
+- The only complete rollback is restoring the backup noted before applying, which loses everything
+  written after it. Anything else needs its own reviewed procedure.
+
+**Not part of this step:**
+- **History rows.** It writes none, as step 3 wrote none; the Preview's test project has no
+  `supabase_migrations.schema_migrations` table (Slice 12.9, read-only).
+- **019**, demo funding (step 7), and Auth (step 6).
+
+**Checked so far** **[local]**: never against a hosted database.
+- **Package scenarios.** `scripts/test-db.sh` runs them on every run, on PostgreSQL 16.15 and 17.10,
+  profiles 017 and 019. They include:
+  - a clean 001–022 build; 021 → 022 with every row of all 23 tables unchanged;
+  - a second run; states 022 would strand, and inconsistent money;
+  - a recorded and a duplicate venue order id; history from another mechanism, and none at all;
+  - a lock held past lock_timeout; an error, and a killed session, after 022 ran inside the statement;
+  - default privileges that would widen the new functions; two runs at once.
+
+  The package's `README.md` lists each scenario and its result.
+- **The block, with a stand-in for `psql`, in 24 cases.**
+  - The check always ran read-only and from the private copy, and `apply.sql` ran only after READY.
+  - Exit statuses: 0, 11 and 2 for check; 0, 11, 3, 2 and 12 for apply.
+  - Each ended with 10 and no `psql` call: a wrong mode (empty, `APPLY`, `apply `); an altered, missing
+    or symlinked package file; a damaged manifest; a URI or password connection; `PGHOSTADDR` set; a
+    tampered block; a placeholder left in it.
+  - Nothing was left in `TMPDIR`.
+- **The whole block, with the real `psql` 16.15, against throwaway PostgreSQL 16.15 and 17.10
+  clusters,** over TCP to 127.0.0.1, from the repository root:
+  - **A 001–021 database with demo activity:**
+    - check READY (0), then apply PASS (0), every row of all 23 tables identical;
+    - then check BLOCKED (11), and apply BLOCKED (11), with `apply.sql` not run.
+  - **The same without a history table, as on the Preview's project:** READY, then PASS.
+  - **One with a `PARTIALLY_FILLED` order:** BLOCKED (P09, M2) in both modes.
+  - **A clean 001–022 build:** BLOCKED.
+- **Not verified until it runs there [unverified]:**
+  - that the hosted project's schema matches the local fingerprint (P07). It is expected to: step 3
+    installed it from byte-identical files and step 5 matched it in Slice 12.9;
+  - the session pooler and Supabase's own sessions under the lock;
+  - the dashboard's backups.
 
 #### 4. If the sequence stops, or its outcome is unclear
 
@@ -518,9 +906,18 @@ again on the finished 017 state:
 | `016_money_functions_return_text.sql` | right after 016: no change. **On the 017 state: succeeded and silently replaced 017's `reconcile_wallets()` with 016's (other body and comment), and removed `service_role`'s EXECUTE on it** |
 | `018_order_placement.sql`, `020_fill_settlement.sql` | Slice 10, on the finished 021 state: succeeded without changing anything: every function in `public` kept its definition and its privileges |
 | `021_enable_demo_trading.sql` | Slice 10, on the finished 021 state: succeeded; the trading and swap flags of all 16 pairs unchanged, but `updated_at` moved on the three demo pairs (trigger `trading_pairs_touch`) |
+| `018_order_placement.sql` | Slice 14C, on the finished 022 state: **succeeded and silently replaced 022's `cancel_order` with 018's**, which releases a `SUBMITTED` or `PARTIALLY_FILLED` order on the customer's request |
+| `020_fill_settlement.sql` | Slice 14C, on the finished 022 state: **succeeded and silently replaced 022's `apply_fill` with 020's**, which takes a fill on an order never submitted to a venue |
+| `022_submitted_lifecycle.sql` | Slice 14C, on the finished 022 state: succeeded without changing anything: every definition, every privilege and every row identical (`SUBMITTED` already exists: a notice, skipped) |
 
 The Slice 10 rows were observed on PostgreSQL 16.15 built from the 20 files on Supabase Auth v2.177.0's own
-`auth` schema, each re-run inside a transaction that was rolled back. These are local observations, not a guarantee for any hosted configuration. They are why no step here
+`auth` schema, each re-run inside a transaction that was rolled back. The Slice 14C rows were observed on PostgreSQL 16.15 and 17.10 databases built from the 21 files through
+step 3's gate, with this repository's stand-ins for Supabase's roles and `auth` schema. Each re-run ran
+inside a transaction that was then rolled back. On that state, the other files behaved as the rows above
+describe: 001–010, 014 and 017 failed and were rolled back; 011–013 changed nothing; 015 and 021 changed
+rows of `tier_limits` and `trading_pairs`; 016 replaced `reconcile_wallets()`.
+
+These are local observations, not a guarantee for any hosted configuration. They are why no step here
 re-runs anything.
 
 Read-only diagnostics:
@@ -534,7 +931,8 @@ Read-only diagnostics:
   - after `016`, no function `public.limit_usage_in_window` exists;
   - after `017`, `public.limit_usage_total` exists;
   - after `018`, `public.place_limit_order` and `public.cancel_order` exist;
-  - after `020`, `public.apply_fill` exists.
+  - after `020`, `public.apply_fill` exists;
+  - after `022`, `public.claim_order_for_submission` exists and `order_status` has the value `SUBMITTED` (`select count(*) from pg_enum where enumtypid = 'public.order_status'::regtype and enumlabel = 'SUBMITTED'` gives 1 after it, 0 before).
 - **Then** continue with the first file that has not committed, under the owner's go, once the cause of the stop is known.
 - **If the state cannot be established,** a new, empty test project is cleaner than repairing this one (owner decision; this project holds no data).
 
@@ -648,7 +1046,8 @@ JIMOCEX_STEP5
 - **Locally.**
   - *Phase 2.4:* the real `psql` 16.15 with this block's options (`-X -q -At -1 -v ON_ERROR_STOP=1 -c 'set transaction read only' -f supabase/tests/02_money_catalog.sql`), connected with `-h <socket directory> -U postgres -d fp`, not with a connection string, gave catalogs that matched at 017 and at 017 + 019, and a 019 database failed the 017 profile as it should **[local]**.
   - *Slice 10:* both checkers matched (profile 017: 23 tables, 22 functions, 21 policies; 36 money columns, 6 jsonb columns, 14 functions) a catalog taken read-only with `02_money_catalog.sql` from PostgreSQL 16.15 built from the 20 files on Supabase Auth v2.177.0's own `auth` schema, connected through a socket, not through this block **[local]**.
-  - *The connection string as the value of `-d`*, this block's form, has not been run against a database built from the migrations, nor against a hosted one. The psql(1) man page says `-d` accepts a connection string **[local: psql(1) man page 16.15]**. In Phase 3.12 the same options with a connection string after `-d` ran against a throwaway local PostgreSQL 17.10 that holds no JimoCex schema; the string named a Unix-socket directory, which this block's own check refuses, so `psql` was called directly, not through the block. There a file with a write in it was refused, an SQL error ended with 3, a failed connection with 2, and the real first checker reported a mismatch for that database **[local]**.
+  - *Slice 14C:* the catalog query ran with this block's `psql` options and the connection as the value of `-d` (`host=127.0.0.1 … sslmode=disable`), directly rather than through the block, on PostgreSQL 16.15 and 17.10 databases built from the 21 files through step 3's gate. Both checkers matched: profile 017 with 23 tables, 25 functions and 21 policies; 36 money columns, 6 jsonb columns and 17 functions **[local]**. These counts include 022's three functions. A database at 021 does not match the registries of a commit that has 022: both checkers name the three functions as missing **[local]**.
+  - *The connection string as the value of `-d`*, this block's form, has not been run against a hosted database; against a local one built from the migrations, only outside the block (Slice 14C, above). The psql(1) man page says `-d` accepts a connection string **[local: psql(1) man page 16.15]**. In Phase 3.12 the same options with a connection string after `-d` ran against a throwaway local PostgreSQL 17.10 that holds no JimoCex schema; the string named a Unix-socket directory, which this block's own check refuses, so `psql` was called directly, not through the block. There a file with a write in it was refused, an SQL error ended with 3, a failed connection with 2, and the real first checker reported a mismatch for that database **[local]**.
   - *The block itself* (its checks, the repository check, the temporary file, the order of the checkers) was run only with stand-ins for `psql` (Phases 3.6, 3.8, 3.12 and 3.14 in earlier forms, Phase 3.15 as written here), never against a database.
 - **On a real project** a mismatch can also come from Supabase's own roles or settings **[unverified]**. Either way a mismatch is a stop, not something to adjust by hand.
 - `supabase/tests/01_invariants.sql` is for throwaway local clusters (`scripts/test-db.sh`), not for a hosted project.
@@ -734,7 +1133,7 @@ ledger. Not run against a test project.
 
 The plan allows it (Pro), and the project has no branches today. It needs Branching switched on for the
 production project (a change to that project), the GitHub integration and a `supabase/config.toml`.
-Branches start empty and run `supabase/migrations`, so a branch would be at 021 (001–018, 020, 021) while
+Branches start empty and run `supabase/migrations`, so a branch would be at 022 (001–018, 020–022) while
 production is at 015. Depending on configuration, the integration can also run migrations against production when the
 production branch changes. That conflicts with the manual, authorized v4 procedure in
 `docs/rollout-019.md`, so it is not recommended until the migration process is settled.
@@ -971,7 +1370,10 @@ checks passed:
 ## Open decisions (owner)
 
 Not settled by this document:
-- whether the test project gets 018, 020 and 021 (step 3 now applies them with 001–017; 021 enables LIMIT orders on BTC-USDT, ETH-USDT and SOL-USDT);
+- whether the test project gets 018 and 020–022, which step 3 now applies with 001–017:
+  - 021 enables LIMIT orders on BTC-USDT, ETH-USDT and SOL-USDT;
+  - 022 adds the `SUBMITTED` state and the venue-safe order lifecycle, which nothing in the application calls yet;
+- whether, and when, the Preview's test project (at 021) is upgraded to 022 through step 3b: its block is written and verified locally only, and needs review before it runs there;
 - whether the Preview gets the **test** project's service-role key, which placing and cancelling orders needs (**What the application reads from the environment**);
 - whether a demo account is funded on the test project (step 7), and which;
 - whether the test project gets 019;

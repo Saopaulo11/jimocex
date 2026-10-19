@@ -11,6 +11,7 @@ import {
   type ExecutionOrderView,
   type ExecutionProvider,
   type ExternalOrderRef,
+  type FillReporting,
 } from "./types.ts";
 
 /**
@@ -60,6 +61,11 @@ export class ExecutionService {
   /** Whether a real venue is wired. False means every call returns UNAVAILABLE. */
   isConfigured(): boolean {
     return this.provider.isConfigured();
+  }
+
+  /** How the venue reports execution — decides which settlement path its fills take. */
+  fillReporting(): FillReporting {
+    return this.provider.fillReporting;
   }
 
   /** Places an order at the venue. The request MUST carry the internal clientOrderId. */
